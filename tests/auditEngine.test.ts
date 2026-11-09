@@ -7,9 +7,10 @@ import {
   TOPIC_TRANSFER, 
   TOPIC_APPROVAL, 
   TOPIC_SWAP_V2, 
-  padTopicAddress 
+  padTopicAddress,
+  type RawLogBundle
 } from '../src/services/activityFetcher.js';
-import type { RawLogBundle, AuditReport } from '../src/types.js';
+import type { AuditReport } from '../src/types.js';
 
 async function runTests() {
   console.log('🧪 Starting Pharos Audit-Log Agent Automated Test Suite...\n');
