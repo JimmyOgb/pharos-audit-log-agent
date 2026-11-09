@@ -146,34 +146,64 @@ export function exportToCSV(report: AuditReport): string {
   const rows: string[] = [];
   rows.push(headers.join(','));
 
-  for (const item of report.allActivities) {
-    const row = [
+  if (report.allActivities.length === 0) {
+    const emptyRow = [
       escapeCSV(report.reportId),
       escapeCSV(report.walletAddress),
       escapeCSV(report.coverage.completeness),
-      escapeCSV(item.blockNumber),
-      escapeCSV(item.timestamp),
-      escapeCSV(item.dateFormatted),
-      escapeCSV(item.category),
-      escapeCSV(item.categoryLabel),
-      escapeCSV(item.assetType),
-      escapeCSV(item.isNative),
-      escapeCSV(item.title),
-      escapeCSV(item.description),
-      escapeCSV(item.from),
-      escapeCSV(item.to),
-      escapeCSV(item.tokenAddress || ''),
-      escapeCSV(item.tokenSymbol || ''),
-      escapeCSV(item.formattedAmount || ''),
-      escapeCSV(item.status),
-      escapeCSV(item.allowanceStatus || ''),
-      escapeCSV(Boolean(item.isSwapComponent)),
-      escapeCSV(item.isNotable),
-      escapeCSV(item.notableReason || ''),
-      escapeCSV(item.txHash),
-      escapeCSV(item.explorerUrl)
+      escapeCSV(report.startBlock),
+      escapeCSV(''),
+      escapeCSV(report.startDate),
+      escapeCSV('none'),
+      escapeCSV('No Activity'),
+      escapeCSV('NATIVE_PHAROS'),
+      escapeCSV(false),
+      escapeCSV('No activity detected'),
+      escapeCSV(`Zero on-chain activities detected within inspected window (${report.coverage.actualScannedBlocksCount.toLocaleString()} blocks).`),
+      escapeCSV(report.walletAddress),
+      escapeCSV(''),
+      escapeCSV(''),
+      escapeCSV(''),
+      escapeCSV('0.0000 PHAROS'),
+      escapeCSV('SUCCESS'),
+      escapeCSV(''),
+      escapeCSV(false),
+      escapeCSV(false),
+      escapeCSV(''),
+      escapeCSV(''),
+      escapeCSV('')
     ];
-    rows.push(row.join(','));
+    rows.push(emptyRow.join(','));
+  } else {
+    for (const item of report.allActivities) {
+      const row = [
+        escapeCSV(report.reportId),
+        escapeCSV(report.walletAddress),
+        escapeCSV(report.coverage.completeness),
+        escapeCSV(item.blockNumber),
+        escapeCSV(item.timestamp),
+        escapeCSV(item.dateFormatted),
+        escapeCSV(item.category),
+        escapeCSV(item.categoryLabel),
+        escapeCSV(item.assetType),
+        escapeCSV(item.isNative),
+        escapeCSV(item.title),
+        escapeCSV(item.description),
+        escapeCSV(item.from),
+        escapeCSV(item.to),
+        escapeCSV(item.tokenAddress || ''),
+        escapeCSV(item.tokenSymbol || ''),
+        escapeCSV(item.formattedAmount || ''),
+        escapeCSV(item.status),
+        escapeCSV(item.allowanceStatus || ''),
+        escapeCSV(Boolean(item.isSwapComponent)),
+        escapeCSV(item.isNotable),
+        escapeCSV(item.notableReason || ''),
+        escapeCSV(item.txHash),
+        escapeCSV(item.explorerUrl)
+      ];
+      rows.push(row.join(','));
+    }
   }
 
   return rows.join('\r\n');

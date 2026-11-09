@@ -43,8 +43,10 @@ export async function fetchNativeTransactions(
   let startNonce = 0;
   let endNonce = 0;
   try {
+    // Query fromBlock - 1n so that transactions executed at fromBlock are included
+    const queryFromBlock = fromBlock > 0n ? fromBlock - 1n : 0n;
     const [startNonceRes, endNonceRes] = await Promise.all([
-      rpcClient.getTransactionCount({ address: target as `0x${string}`, blockNumber: fromBlock }),
+      rpcClient.getTransactionCount({ address: target as `0x${string}`, blockNumber: queryFromBlock }),
       rpcClient.getTransactionCount({ address: target as `0x${string}`, blockNumber: toBlock }),
     ]);
     startNonce = Number(startNonceRes);

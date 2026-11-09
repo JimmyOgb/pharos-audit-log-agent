@@ -101,6 +101,22 @@ export interface NetworkConfig {
   explorerUrl: string;
 }
 
+export interface ContinuationState {
+  originalTargetAddress: string;
+  requestedStartDate: string;
+  requestedEndDate: string;
+  resolvedStartBlock: number;
+  resolvedEndBlock: number;
+  totalRequestedBlocks: number;
+  scannedBlockRanges: { fromBlock: number; toBlock: number }[];
+  totalScannedBlocks: number;
+  accumulatedActivities: ActivityItem[];
+  nextFromBlock: number;
+  nextToBlock: number;
+  isComplete: boolean;
+  empiricalSecondsPerBlock?: number;
+}
+
 export interface ScanCoverage {
   requestedStartDate: string;
   requestedEndDate: string;
@@ -125,6 +141,7 @@ export interface ScanCoverage {
     nextFromBlock: number;
     nextToBlock: number;
   };
+  continuationState?: ContinuationState;
 }
 
 export interface AuditReport {
@@ -137,6 +154,7 @@ export interface AuditReport {
   endBlock: number;
   network: NetworkConfig;
   coverage: ScanCoverage;
+  continuationState?: ContinuationState;
   summary: {
     totalTransactions: number;
     totalEvents: number;
@@ -166,6 +184,7 @@ export interface AuditRequest {
   startDate?: string;
   endDate?: string;
   blockSpan?: number;
+  continuationState?: ContinuationState;
   cursor?: {
     fromBlock: number;
     toBlock: number;

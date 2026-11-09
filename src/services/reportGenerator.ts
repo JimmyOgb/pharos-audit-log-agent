@@ -7,14 +7,14 @@ import { fetchNativeTransactions, formatPharos } from './nativeFetcher.js';
 import { pharosAtlantic, rpcClient } from './rpc.js';
 
 export async function generateAuditReport(request: AuditRequest): Promise<AuditReport> {
-  const { address, startDate, endDate, blockSpan, cursor } = request;
+  const { address, startDate, endDate, blockSpan, cursor, continuationState } = request;
 
   if (!address || !isAddress(address)) {
     throw new Error(`Invalid EVM wallet address: "${address}". Expected 0x followed by 40 hex characters.`);
   }
 
   // 1. Resolve date range to verified block numbers and scan coverage
-  const range = await resolveBlockRange(startDate, endDate, blockSpan || 3000, cursor);
+  const range = await resolveBlockRange(startDate, endDate, blockSpan || 3000, cursor, continuationState, address);
   const coverage = range.coverage;
 
   let rawLogsRetrieved = 0;
@@ -105,28 +105,49 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
   }
 
   // 6. Merge activities cleanly (avoiding duplicate accounting)
-  const unifiedActivities: ActivityItem[] = [...logClassification.allActivities];
+  const currentChunkActivities: ActivityItem[] = [...logClassification.allActivities];
   const existingTxAndCategory = new Set<string>();
 
-  for (const act of unifiedActivities) {
+  for (const act of currentChunkActivities) {
     existingTxAndCategory.add(`${act.txHash.toLowerCase()}-${act.category}`);
   }
 
   for (const nativeAct of nativeResult.activities) {
     // If it's a native transfer, it represents native currency value
     if (nativeAct.isNative) {
-      unifiedActivities.push(nativeAct);
+      currentChunkActivities.push(nativeAct);
     } else if (!existingTxAndCategory.has(`${nativeAct.txHash.toLowerCase()}-${nativeAct.category}`)) {
       // Contract call without existing log
-      unifiedActivities.push(nativeAct);
+      currentChunkActivities.push(nativeAct);
       existingTxAndCategory.add(`${nativeAct.txHash.toLowerCase()}-${nativeAct.category}`);
+    }
+  }
+
+  // Merge with accumulated activities from earlier continuation chunks
+  const previousActivities = continuationState?.accumulatedActivities || [];
+  const combinedRaw = [...previousActivities, ...currentChunkActivities];
+
+  // Deduplicate across chunks using composite key: txHash-category-assetType-id
+  const unifiedActivities: ActivityItem[] = [];
+  const seenCompositeKeys = new Set<string>();
+
+  for (const act of combinedRaw) {
+    const key = `${act.txHash.toLowerCase()}-${act.category}-${act.assetType}-${act.id || ''}`;
+    if (!seenCompositeKeys.has(key)) {
+      seenCompositeKeys.add(key);
+      unifiedActivities.push(act);
     }
   }
 
   // Sort unified activities newest first
   unifiedActivities.sort((a, b) => b.blockNumber - a.blockNumber || b.timestamp - a.timestamp);
 
-  // 7. Aggregate unified CategoryTotals
+  // If next continuation state is active, preserve all accumulated activities for subsequent requests
+  if (range.continuationState) {
+    range.continuationState.accumulatedActivities = unifiedActivities;
+  }
+
+  // 7. Aggregate unified CategoryTotals across full accumulated activity list
   const inboundNative = unifiedActivities.filter(a => a.category === 'transfers_in' && a.isNative);
   const outboundNative = unifiedActivities.filter(a => a.category === 'transfers_out' && a.isNative);
   const inboundErc20 = unifiedActivities.filter(a => a.category === 'transfers_in' && !a.isNative);
@@ -167,6 +188,20 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     }
   }
 
+  const approvalsList = unifiedActivities.filter(a => a.category === 'token_approvals');
+  const unlimitedApprovals = approvalsList.filter(a => 
+    a.notableReason?.includes('Unlimited') || a.isNotable || (a.rawAmount && a.rawAmount.length > 30)
+  ).length;
+  const currentVerifiedUnlimited = approvalsList.filter(a => 
+    a.allowanceStatus === 'Current unlimited allowance verified'
+  ).length;
+  const currentReducedOrRevoked = approvalsList.filter(a => 
+    a.allowanceStatus === 'Current allowance reduced or revoked'
+  ).length;
+  const currentUnavailable = approvalsList.filter(a => 
+    a.allowanceStatus === 'Current allowance unavailable or unverified'
+  ).length;
+
   const categoryTotals: CategoryTotals = {
     transfers_in: {
       count: unifiedActivities.filter(a => a.category === 'transfers_in').length,
@@ -188,7 +223,14 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
       count: unifiedActivities.filter(a => a.category === 'swaps').length,
       dexProtocols: Array.from(dexProtocols),
     },
-    token_approvals: logClassification.categoryTotals.token_approvals,
+    token_approvals: {
+      count: approvalsList.length,
+      unlimitedApprovals,
+      currentVerifiedUnlimited,
+      currentReducedOrRevoked,
+      currentUnavailable,
+      uniqueSpenders: spenders.size,
+    },
     contract_interactions: {
       count: unifiedActivities.filter(a => a.category === 'contract_interactions').length,
       uniqueContracts: uniqueContracts.size,
@@ -242,9 +284,9 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
   let completenessNarrative = '';
 
   if (coverage.completeness === 'COMPLETE') {
-    completenessNarrative = `A COMPLETE audit covering 100.0% of the requested date range (${coverage.requestedStartDate} to ${coverage.requestedEndDate}; blocks ${coverage.actualStartBlock} to ${coverage.actualEndBlock}) was executed successfully across ${coverage.scannedChunksCount} block chunk(s).`;
+    completenessNarrative = `A COMPLETE audit covering 100.0% of the requested date range (${coverage.requestedStartDate} to ${coverage.requestedEndDate}; blocks ${coverage.resolvedStartBlock} to ${coverage.resolvedEndBlock}) was executed successfully across ${coverage.scannedChunksCount} block chunk(s).`;
   } else if (coverage.completeness === 'PARTIAL') {
-    completenessNarrative = `A PARTIAL audit covering ${coverage.coveragePercentage}% of the requested range (${coverage.actualScannedBlocksCount.toLocaleString()} of ${coverage.requestedBlockSpan.toLocaleString()} requested blocks; ${coverage.omittedBlockCount.toLocaleString()} earlier blocks omitted due to execution boundary safeguards) was executed. Scanned coverage: ${coverage.actualStartDateFormatted} to ${coverage.actualEndDateFormatted} (blocks ${coverage.actualStartBlock} to ${coverage.actualEndBlock}). Continuation cursor is provided to inspect earlier blocks.`;
+    completenessNarrative = `A PARTIAL audit covering ${coverage.coveragePercentage}% of the requested range (${coverage.actualScannedBlocksCount.toLocaleString()} blocks scanned in this chunk; ${coverage.omittedBlockCount.toLocaleString()} remaining blocks uninspected due to execution boundary safeguards). Scanned coverage: ${coverage.actualStartDateFormatted} to ${coverage.actualEndDateFormatted} (blocks ${coverage.actualStartBlock} to ${coverage.actualEndBlock}). Continuation cursor is provided to inspect remaining blocks.`;
   } else {
     completenessNarrative = `Audit execution FAILED during scanning: ${coverage.failureReason || 'RPC query error'}.`;
   }
@@ -254,7 +296,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     if (coverage.completeness === 'COMPLETE') {
       activityNarrative = `No qualifying on-chain activity was detected across the entire requested block window. The wallet maintained a completely idle state with zero inbound transfers, zero outbound transfers, zero swaps, and zero approval grants.`;
     } else {
-      activityNarrative = `No qualifying on-chain activity was detected within the inspected ${coverage.actualScannedBlocksCount.toLocaleString()}-block window (${coverage.actualStartDateFormatted} to ${coverage.actualEndDateFormatted}). Note: earlier blocks (${coverage.resolvedStartBlock} to ${coverage.actualStartBlock - 1}) were not covered in this request and require continuation scanning before the wallet can be certified idle across the full requested calendar period.`;
+      activityNarrative = `No qualifying on-chain activity was detected within the inspected ${coverage.actualScannedBlocksCount.toLocaleString()}-block window (${coverage.actualStartDateFormatted} to ${coverage.actualEndDateFormatted}). Note: remaining blocks (${coverage.actualEndBlock + 1} to ${coverage.resolvedEndBlock}) were not covered in this request and require continuation scanning before the wallet can be certified idle across the full requested calendar period.`;
     }
   } else {
     activityNarrative = `Detected a total of ${unifiedActivities.length} on-chain activities: ${categoryTotals.transfers_in.count} inbound transfer(s) (${categoryTotals.transfers_in.nativeCount} native PHAROS, ${categoryTotals.transfers_in.erc20Count} ERC-20), ${categoryTotals.transfers_out.count} outbound transfer(s) (${categoryTotals.transfers_out.nativeCount} native PHAROS, ${categoryTotals.transfers_out.erc20Count} ERC-20), ${categoryTotals.swaps.count} DEX swap(s), ${categoryTotals.token_approvals.count} token approval(s), and ${categoryTotals.contract_interactions.count} contract interaction(s). Notable transaction alerts: ${notableTransactions.length}. Net native balance impact: ${categoryTotals.native_summary.netNativeChangeFormatted}.`;
@@ -285,6 +327,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
       explorerUrl: pharosAtlantic.blockExplorers?.default.url || 'https://atlantic.pharosscan.com',
     },
     coverage,
+    continuationState: range.continuationState,
     summary: {
       totalTransactions: allTxHashes.size,
       totalEvents: unifiedActivities.length,

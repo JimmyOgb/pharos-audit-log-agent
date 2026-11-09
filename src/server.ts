@@ -40,7 +40,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // Generate Audit Report
 app.post('/api/report', async (req: Request, res: Response) => {
   try {
-    const { address, startDate, endDate, blockSpan, cursor } = req.body;
+    const { address, startDate, endDate, blockSpan, cursor, continuationState } = req.body;
     if (!address) {
       return res.status(400).json({ success: false, error: 'Missing required field: "address"' });
     }
@@ -50,6 +50,7 @@ app.post('/api/report', async (req: Request, res: Response) => {
       startDate: startDate ? String(startDate) : undefined,
       endDate: endDate ? String(endDate) : undefined,
       blockSpan: blockSpan ? Number(blockSpan) : undefined,
+      continuationState: continuationState && typeof continuationState === 'object' ? continuationState : undefined,
       cursor: cursor && typeof cursor === 'object' ? {
         fromBlock: Number(cursor.fromBlock),
         toBlock: Number(cursor.toBlock),

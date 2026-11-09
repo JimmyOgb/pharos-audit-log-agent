@@ -432,6 +432,7 @@ export function renderDashboardHtml(): string {
     }
 
     let currentReport = null;
+    let currentContinuationState = null;
 
     async function handleAuditSubmit(e) {
       e.preventDefault();
@@ -462,6 +463,7 @@ export function renderDashboardHtml(): string {
         }
 
         currentReport = data.report;
+        currentContinuationState = data.report.continuationState || null;
         renderReport(currentReport);
       } catch (err) {
         alert('Network error connecting to Pharos node: ' + err.message);
@@ -485,11 +487,25 @@ export function renderDashboardHtml(): string {
 
       let partialNoticeHtml = '';
       if (cov.completeness === 'PARTIAL') {
-        let continueBtn = '';
-        if (cov.continuationCursor) {
-          continueBtn = '<button onclick="continueScan(' + cov.continuationCursor.nextFromBlock + ', ' + cov.continuationCursor.nextToBlock + ')" style="background: #f59e0b; color: #000; border: none; font-weight: 600; padding: 0.4rem 0.85rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Scan Next Chunk (' + cov.continuationCursor.nextFromBlock + '..' + cov.continuationCursor.nextToBlock + ') ↗</button>';
+        const totalScanned = r.continuationState ? r.continuationState.totalScannedBlocks : cov.actualScannedBlocksCount;
+        const totalReq = r.continuationState ? r.continuationState.totalRequestedBlocks : cov.requestedBlockSpan;
+        const remaining = cov.omittedBlockCount || 0;
+        
+        let actionBtns = '';
+        if (r.continuationState) {
+          actionBtns = '<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">' +
+            '<button type="button" onclick="continueScan()" style="background: #f59e0b; color: #000; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⏭️ Scan Next Chunk (3,000 blocks)</button>' +
+            '<button type="button" id="btnAutoScan" onclick="autoScanAll()" style="background: #3b82f6; color: #fff; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⚡ Auto-Scan Remaining</button>' +
+          '</div>';
+        } else if (cov.continuationCursor) {
+          actionBtns = '<button type="button" onclick="continueScan()" style="background: #f59e0b; color: #000; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⏭️ Scan Next Chunk</button>';
         }
-        partialNoticeHtml = '<div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;"><div><strong style="color: #f59e0b;">⚠️ Partial Audit Notice:</strong> <span style="font-size: 0.85rem; color: #cbd5e1;">Covered ' + (cov.coveragePercentage || 0) + '% (' + (cov.actualScannedBlocksCount || 0) + ' of ' + (cov.requestedBlockSpan || 0) + ' blocks). ' + (cov.omittedBlockCount || 0) + ' earlier blocks omitted due to execution boundary safeguards.</span></div>' + continueBtn + '</div>';
+
+        partialNoticeHtml = '<div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 0.9rem 1.1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">' +
+          '<div><strong style="color: #f59e0b;">⚠️ Partial Audit Coverage (' + (cov.coveragePercentage || 0) + '%):</strong> ' +
+          '<span style="font-size: 0.85rem; color: #cbd5e1;">Scanned ' + (totalScanned ? totalScanned.toLocaleString() : 0) + ' of ' + (totalReq ? totalReq.toLocaleString() : 0) + ' requested blocks. ' + (remaining ? remaining.toLocaleString() : 0) + ' remaining blocks uninspected.</span></div>' +
+          actionBtns +
+        '</div>';
       }
 
       let notableRows = '';
@@ -640,37 +656,82 @@ export function renderDashboardHtml(): string {
       container.scrollIntoView({ behavior: 'smooth' });
     }
 
-    async function continueScan(fromBlock, toBlock) {
-      const address = document.getElementById('addressInput').value.trim();
+    async function continueScan(isAuto = false) {
+      if (!currentReport) {
+        alert('No active audit report to continue.');
+        return false;
+      }
+
       const btnSubmit = document.getElementById('btnSubmit');
       const btnText = document.getElementById('btnText');
       const btnSpinner = document.getElementById('btnSpinner');
 
-      btnSubmit.disabled = true;
-      btnText.innerText = 'Continuing Scan...';
-      btnSpinner.style.display = 'inline-block';
+      if (!isAuto) {
+        btnSubmit.disabled = true;
+        btnText.innerText = 'Scanning Chunk...';
+        btnSpinner.style.display = 'inline-block';
+      }
 
       try {
+        const payload = {
+          address: currentReport.walletAddress,
+        };
+
+        if (currentContinuationState) {
+          payload.continuationState = currentContinuationState;
+        } else if (currentReport.coverage && currentReport.coverage.continuationCursor) {
+          payload.cursor = currentReport.coverage.continuationCursor;
+        } else {
+          alert('Audit is already complete or no continuation available.');
+          return false;
+        }
+
         const resp = await fetch('/api/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            address,
-            cursor: { fromBlock, toBlock }
-          })
+          body: JSON.stringify(payload)
         });
+
         const data = await resp.json();
-        if (data.success) {
-          renderReport(data.report);
+        if (data.success && data.report) {
+          currentReport = data.report;
+          currentContinuationState = data.report.continuationState || null;
+          renderReport(currentReport);
+          return true;
         } else {
-          alert('Continuation failed: ' + data.error);
+          alert('Continuation failed: ' + (data.error || 'Unknown error'));
+          return false;
         }
       } catch (e) {
         alert('Continuation error: ' + e.message);
+        return false;
       } finally {
-        btnSubmit.disabled = false;
-        btnText.innerText = 'Generate Audit';
-        btnSpinner.style.display = 'none';
+        if (!isAuto) {
+          btnSubmit.disabled = false;
+          btnText.innerText = 'Generate Audit';
+          btnSpinner.style.display = 'none';
+        }
+      }
+    }
+
+    async function autoScanAll() {
+      const autoBtn = document.getElementById('btnAutoScan');
+      if (autoBtn) {
+        autoBtn.disabled = true;
+        autoBtn.innerText = 'Auto-Scanning...';
+      }
+
+      let safety = 0;
+      while (currentContinuationState && !currentReport.coverage.isComplete && safety < 50) {
+        safety++;
+        const ok = await continueScan(true);
+        if (!ok) break;
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      if (autoBtn) {
+        autoBtn.disabled = false;
+        autoBtn.innerText = '⚡ Auto-Scan Remaining';
       }
     }
 

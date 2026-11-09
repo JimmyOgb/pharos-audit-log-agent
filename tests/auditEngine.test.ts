@@ -16,7 +16,7 @@ import {
 import type { AuditReport, ActivityItem } from '../src/types.js';
 
 async function runTests() {
-  console.log('🧪 Starting Pharos Audit-Log Agent Automated Quality Assurance Suite (26 Tests)...\n');
+  console.log('🧪 Starting Pharos Audit-Log Agent Automated Quality Assurance Suite (33 Tests)...\n');
 
   // ==========================================
   // SECTION 1: DATE COVERAGE (Tests 1 - 7)
@@ -45,7 +45,8 @@ async function runTests() {
   assert.strictEqual(longRange.coverage.isComplete, false);
   assert(longRange.coverage.omittedBlockCount > 0, 'Must record omitted blocks');
   assert(longRange.coverage.continuationCursor !== undefined, 'Must provide continuation cursor');
-  assert.strictEqual(longRange.coverage.continuationCursor?.nextToBlock, Number(longRange.fromBlock - 1n));
+  assert.strictEqual(longRange.coverage.continuationCursor?.nextFromBlock, Number(longRange.toBlock + 1n));
+  assert.strictEqual(longRange.coverage.continuationCursor?.nextToBlock, Number(longRange.coverage.resolvedEndBlock));
   console.log(`  ✔ Long range marked PARTIAL with ${longRange.coverage.omittedBlockCount.toLocaleString()} blocks omitted and cursor provided.`);
 
   // Test 4: Failed chunk metadata cannot produce COMPLETE status
@@ -87,7 +88,7 @@ async function runTests() {
   // Test 6: Requested and actual coverage are never confused
   console.log('\nTest 6: Requested and actual coverage are strictly separated');
   assert(longRange.coverage.requestedBlockSpan !== longRange.coverage.actualScannedBlocksCount);
-  assert(longRange.coverage.resolvedStartBlock !== longRange.coverage.actualStartBlock);
+  assert(longRange.coverage.resolvedEndBlock !== longRange.coverage.actualEndBlock);
   console.log(`  ✔ Requested (${longRange.coverage.requestedBlockSpan} blocks) vs Actual (${longRange.coverage.actualScannedBlocksCount} blocks) strictly distinguished.`);
 
   // Test 7: Zero-event result from an incomplete scan is labelled PARTIAL, not COMPLETE
@@ -495,7 +496,176 @@ async function runTests() {
   assert(csvExport.split('\r\n')[0].includes('Is_Native'));
   console.log(`  ✔ Markdown, CSV, and PDF mutually reconciled with completeness status: ${sampleReport.coverage.completeness}.`);
 
-  console.log('\n🎉 ALL 26 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
+  // ====================================================
+  // SECTION 5: HISTORICAL CONTINUATION & REGRESSION (Tests 27 - 33)
+  // ====================================================
+  console.log('\n--- SECTION 5: Multi-Chunk Continuation & Historical Regression ---');
+
+  // Test 27: Multi-chunk continuation through multiple chunks and correct accumulation
+  console.log('Test 27: Multi-chunk continuation and activity accumulation');
+  const testWallet = '0xE4220c4b71877bb94EB173f467ef5c5557017085';
+  const chunk1Rep = await generateAuditReport({
+    address: testWallet,
+    continuationState: {
+      originalTargetAddress: testWallet,
+      requestedStartDate: '2026-11-08T03:00:00.000Z',
+      requestedEndDate: '2026-11-08T06:00:00.000Z',
+      resolvedStartBlock: 32460000,
+      resolvedEndBlock: 32466000,
+      totalRequestedBlocks: 6001,
+      scannedBlockRanges: [],
+      totalScannedBlocks: 0,
+      accumulatedActivities: [],
+      nextFromBlock: 32460000,
+      nextToBlock: 32466000,
+      isComplete: false,
+      empiricalSecondsPerBlock: 2.18,
+    }
+  });
+  assert.strictEqual(chunk1Rep.coverage.completeness, 'PARTIAL');
+  assert(chunk1Rep.continuationState !== undefined);
+
+  // Chunk 2 contains block 32463702
+  const chunk2Rep = await generateAuditReport({
+    address: testWallet,
+    continuationState: chunk1Rep.continuationState
+  });
+  assert(chunk2Rep.allActivities.length >= 1, 'Chunk 2 must discover block 32463702 native transfer');
+  assert.strictEqual(chunk2Rep.categoryTotals.transfers_out.count, 1);
+  console.log('  ✔ Multi-chunk continuation discovered activity and accumulated into report.');
+
+  // Test 28: Zero-event chunk does not erase earlier events
+  console.log('\nTest 28: Zero-event chunk does not erase earlier events');
+  const dummyActivity: ActivityItem = {
+    id: 'tx-persisted-1',
+    txHash: '0xpersisted00000000000000000000000000000000000000000000000000000001',
+    blockNumber: 32463000,
+    timestamp: 1794110000,
+    dateFormatted: '2026-11-08 04:00:00 UTC',
+    category: 'transfers_out',
+    categoryLabel: 'Transfers Out',
+    title: 'Earlier Outbound Transfer',
+    description: 'Prior chunk finding',
+    from: testWallet,
+    to: '0x70997970c51812dc3a010c7d01b50e0d17dc79c8',
+    assetType: 'NATIVE_PHAROS',
+    isNative: true,
+    isContractCall: false,
+    status: 'SUCCESS',
+    rawAmount: '1000000000000000000',
+    formattedAmount: '1.0000 PHAROS',
+    isNotable: false,
+    explorerUrl: 'https://atlantic.pharosscan.com/tx/0xpersisted',
+  };
+  const emptyContinuationRep = await generateAuditReport({
+    address: testWallet,
+    continuationState: {
+      originalTargetAddress: testWallet,
+      requestedStartDate: '2026-11-08T03:00:00.000Z',
+      requestedEndDate: '2026-11-08T06:00:00.000Z',
+      resolvedStartBlock: 32460000,
+      resolvedEndBlock: 32466000,
+      totalRequestedBlocks: 6001,
+      scannedBlockRanges: [{ fromBlock: 32460000, toBlock: 32461000 }],
+      totalScannedBlocks: 1001,
+      accumulatedActivities: [dummyActivity],
+      nextFromBlock: 32461001,
+      nextToBlock: 32462000, // zero event block span
+      isComplete: false,
+      empiricalSecondsPerBlock: 2.18,
+    }
+  });
+  const preservedItem = emptyContinuationRep.allActivities.find(a => a.id === 'tx-persisted-1');
+  assert(preservedItem !== undefined, 'Prior activities must not be erased by subsequent zero-event chunk');
+  assert(emptyContinuationRep.categoryTotals.transfers_out.count >= 1);
+  console.log('  ✔ Earlier events successfully preserved after zero-event chunk.');
+
+  // Test 29: Duplicate continuation requests do not duplicate events
+  console.log('\nTest 29: Duplicate continuation requests do not duplicate events');
+  const dupRep = await generateAuditReport({
+    address: testWallet,
+    continuationState: {
+      originalTargetAddress: testWallet,
+      requestedStartDate: '2026-11-08T03:00:00.000Z',
+      requestedEndDate: '2026-11-08T06:00:00.000Z',
+      resolvedStartBlock: 32460000,
+      resolvedEndBlock: 32466000,
+      totalRequestedBlocks: 6001,
+      scannedBlockRanges: [],
+      totalScannedBlocks: 0,
+      accumulatedActivities: [dummyActivity, dummyActivity], // duplicate in input
+      nextFromBlock: 32461001,
+      nextToBlock: 32462000,
+      isComplete: false,
+      empiricalSecondsPerBlock: 2.18,
+    }
+  });
+  const dupMatches = dupRep.allActivities.filter(a => a.id === 'tx-persisted-1');
+  assert.strictEqual(dupMatches.length, 1, 'Duplicate event must be deduplicated to exactly 1');
+  console.log('  ✔ Duplicate events successfully deduplicated across continuation requests.');
+
+  // Test 30: Modified cursor or mismatched wallet address is strictly rejected
+  console.log('\nTest 30: Modified cursor / mismatched address is strictly rejected');
+  let rejected = false;
+  try {
+    await generateAuditReport({
+      address: '0x1111111111111111111111111111111111111111', // wrong wallet
+      continuationState: {
+        originalTargetAddress: testWallet, // mismatched
+        requestedStartDate: '2026-11-08T03:00:00.000Z',
+        requestedEndDate: '2026-11-08T06:00:00.000Z',
+        resolvedStartBlock: 32460000,
+        resolvedEndBlock: 32466000,
+        totalRequestedBlocks: 6001,
+        scannedBlockRanges: [],
+        totalScannedBlocks: 0,
+        accumulatedActivities: [],
+        nextFromBlock: 32460000,
+        nextToBlock: 32466000,
+        isComplete: false,
+        empiricalSecondsPerBlock: 2.18,
+      }
+    });
+  } catch (err: any) {
+    rejected = err.message.includes('Continuation state address mismatch');
+  }
+  assert.strictEqual(rejected, true, 'Mismatched continuation state must be rejected');
+  console.log('  ✔ Mismatched continuation state address strictly rejected.');
+
+  // Test 31: Historical native transaction outside latest 3,000 blocks detected
+  console.log('\nTest 31: Historical native transaction outside latest 3,000 blocks detected');
+  const histRep = await generateAuditReport({
+    address: testWallet,
+    cursor: { fromBlock: 32463700, toBlock: 32463710 }
+  });
+  assert.strictEqual(histRep.summary.totalTransactions, 1);
+  const histTx = histRep.allActivities.find(a => a.txHash === '0xbc63023089ccd1856d956f23288b58165fda5e8cf9e56f668cfbf0f13f2c9bf9');
+  assert(histTx !== undefined, 'Known 25 PHAROS transaction must be detected');
+  assert.strictEqual(histTx.assetType, 'NATIVE_PHAROS');
+  assert.strictEqual(histTx.formattedAmount, '25.0000 PHAROS');
+  assert.strictEqual(histTx.status, 'SUCCESS');
+  assert.strictEqual(histTx.blockNumber, 32463702);
+  console.log('  ✔ Historical 25.0000 PHAROS transaction outside latest 3,000 blocks verified.');
+
+  // Test 32: Positive-control ERC-20 transfer detected
+  console.log('\nTest 32: Positive-control ERC-20 transfer detected');
+  const posCtrlRep = await generateAuditReport({
+    address: '0x89b97db15f0bc3b12c8a2e4ae8549788c0823838',
+    cursor: { fromBlock: 32498190, toBlock: 32498200 }
+  });
+  const erc20Tx = posCtrlRep.allActivities.find(a => a.txHash === '0x8f9bb0cd457709499aefbf37a5aea31b2481de3a2ababb50defdcc1e78ab3e8d');
+  assert(erc20Tx !== undefined, 'Positive-control ERC-20 transfer must be detected');
+  assert.strictEqual(erc20Tx.assetType, 'ERC20');
+  assert.strictEqual(erc20Tx.status, 'SUCCESS');
+  console.log('  ✔ Positive-control ERC-20 transfer (0x8f9bb0cd...) successfully detected.');
+
+  // Test 33: Honest disclosure on unindexed inbound native transfers
+  console.log('\nTest 33: Honest disclosure on unindexed inbound native transfers');
+  assert(chunk1Rep.provenance.unsupportedOrPartialNotice !== undefined);
+  assert(chunk1Rep.provenance.unsupportedOrPartialNotice.includes('inbound native transfers'));
+  console.log('  ✔ Provenance transparently discloses unindexed inbound native transfer boundary.');
+
+  console.log('\n🎉 ALL 33 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
 }
 
 runTests().catch((err) => {
