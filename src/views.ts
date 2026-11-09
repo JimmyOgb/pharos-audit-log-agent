@@ -479,14 +479,28 @@ export function renderDashboardHtml(): string {
       const catMap = {};
       r.categorySummaries.forEach(c => { catMap[c.category] = c; });
 
+      const cov = r.coverage || {};
+      const statusColor = cov.completeness === 'COMPLETE' ? '#10b981' : (cov.completeness === 'PARTIAL' ? '#f59e0b' : '#ef4444');
+      const statusBg = cov.completeness === 'COMPLETE' ? 'rgba(16, 185, 129, 0.1)' : (cov.completeness === 'PARTIAL' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)');
+
+      let partialNoticeHtml = '';
+      if (cov.completeness === 'PARTIAL') {
+        let continueBtn = '';
+        if (cov.continuationCursor) {
+          continueBtn = '<button onclick="continueScan(' + cov.continuationCursor.nextFromBlock + ', ' + cov.continuationCursor.nextToBlock + ')" style="background: #f59e0b; color: #000; border: none; font-weight: 600; padding: 0.4rem 0.85rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Scan Next Chunk (' + cov.continuationCursor.nextFromBlock + '..' + cov.continuationCursor.nextToBlock + ') ↗</button>';
+        }
+        partialNoticeHtml = '<div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;"><div><strong style="color: #f59e0b;">⚠️ Partial Audit Notice:</strong> <span style="font-size: 0.85rem; color: #cbd5e1;">Covered ' + (cov.coveragePercentage || 0) + '% (' + (cov.actualScannedBlocksCount || 0) + ' of ' + (cov.requestedBlockSpan || 0) + ' blocks). ' + (cov.omittedBlockCount || 0) + ' earlier blocks omitted due to execution boundary safeguards.</span></div>' + continueBtn + '</div>';
+      }
+
       let notableRows = '';
       if (r.notableTransactions.length === 0) {
-        notableRows = '<tr><td colspan="5" style="text-align: center; color: #9ca3af;">No notable high-value transactions or infinite allowance risks identified.</td></tr>';
+        notableRows = '<tr><td colspan="6" style="text-align: center; color: #9ca3af;">No notable high-value transactions, contract failures, or infinite allowance risks identified.</td></tr>';
       } else {
         notableRows = r.notableTransactions.map(t => \`
           <tr>
             <td>\${t.dateFormatted}</td>
             <td><span class="badge badge-\${t.category}">\${t.categoryLabel}</span></td>
+            <td><span style="font-size: 0.75rem; background: #1e293b; padding: 0.2rem 0.4rem; border-radius: 4px;">\${t.assetType || 'ERC20'}</span></td>
             <td><strong>\${t.title}</strong><br><span style="font-size: 0.75rem; color: #ef4444;">\${t.notableReason || ''}</span></td>
             <td style="font-family: 'JetBrains Mono', monospace;">\${t.formattedAmount ? t.formattedAmount + ' ' + (t.tokenSymbol || '') : '-'}</td>
             <td><a href="\${t.explorerUrl}" target="_blank" rel="noopener" class="link-explorer">\${t.txHash.slice(0, 8)}...\${t.txHash.slice(-6)} ↗</a></td>
@@ -496,14 +510,16 @@ export function renderDashboardHtml(): string {
 
       let allRows = '';
       if (r.allActivities.length === 0) {
-        allRows = '<tr><td colspan="5" style="text-align: center; color: #9ca3af;">Zero transactions detected in this block span.</td></tr>';
+        allRows = \`<tr><td colspan="7" style="text-align: center; color: #9ca3af;">Zero activities detected in scanned window (\${cov.actualScannedBlocksCount ? cov.actualScannedBlocksCount.toLocaleString() : 0} blocks).</td></tr>\`;
       } else {
         allRows = r.allActivities.slice(0, 50).map(t => \`
           <tr>
             <td style="font-family: 'JetBrains Mono', monospace;">\${t.blockNumber}</td>
             <td><span class="badge badge-\${t.category}">\${t.categoryLabel}</span></td>
+            <td><span style="font-size: 0.75rem; background: #1e293b; padding: 0.2rem 0.4rem; border-radius: 4px;">\${t.assetType || 'ERC20'}</span></td>
             <td>\${t.title}</td>
             <td style="font-family: 'JetBrains Mono', monospace;">\${t.formattedAmount ? t.formattedAmount + ' ' + (t.tokenSymbol || '') : '-'}</td>
+            <td><span style="font-size: 0.75rem; color: \${t.status === 'REVERTED' ? '#ef4444' : '#10b981'};">\${t.status || 'SUCCESS'}</span></td>
             <td><a href="\${t.explorerUrl}" target="_blank" rel="noopener" class="link-explorer">\${t.txHash.slice(0, 8)}...\${t.txHash.slice(-6)} ↗</a></td>
           </tr>
         \`).join('');
@@ -513,9 +529,14 @@ export function renderDashboardHtml(): string {
         <div class="card summary-card">
           <div class="summary-header">
             <div>
-              <div class="summary-title">Audit Report: \${r.walletAddress}</div>
-              <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem;">
-                Period: \${r.startDate.slice(0, 10)} to \${r.endDate.slice(0, 10)} (Blocks \${r.startBlock}..\${r.endBlock}) • Verified Atlantic Testnet
+              <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <div class="summary-title">Audit Report: \${r.walletAddress}</div>
+                <span style="background: \${statusBg}; border: 1px solid \${statusColor}; color: \${statusColor}; padding: 0.25rem 0.6rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700;">
+                  STATUS: \${cov.completeness || 'COMPLETE'}
+                </span>
+              </div>
+              <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.35rem;">
+                Requested: \${cov.requestedStartDate ? cov.requestedStartDate.slice(0, 10) : ''} to \${cov.requestedEndDate ? cov.requestedEndDate.slice(0, 10) : ''} • Scanned: \${r.startDate} to \${r.endDate} (\${cov.actualScannedBlocksCount ? cov.actualScannedBlocksCount.toLocaleString() : 0} blocks)
               </div>
             </div>
             <div class="export-btns">
@@ -531,21 +552,32 @@ export function renderDashboardHtml(): string {
             </div>
           </div>
 
+          \${partialNoticeHtml}
+
           <div class="narrative-box">
             <strong>Executive Compliance Summary:</strong><br>
             \${r.summary.executiveSummary}
+          </div>
+
+          <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.85rem;">
+            <strong style="color: #38bdf8;">Native Asset (PHAROS) Net Balance Impact:</strong>
+            <span style="color: #94a3b8; margin-left: 0.5rem;">
+              Inbound: <strong>\${r.categoryTotals.native_summary ? r.categoryTotals.native_summary.inboundTotalFormatted : '0.0000 PHAROS'}</strong> (\${r.categoryTotals.native_summary ? r.categoryTotals.native_summary.inboundCount : 0}) • 
+              Outbound: <strong>\${r.categoryTotals.native_summary ? r.categoryTotals.native_summary.outboundTotalFormatted : '0.0000 PHAROS'}</strong> (\${r.categoryTotals.native_summary ? r.categoryTotals.native_summary.outboundCount : 0}) • 
+              Net Delta: <strong style="color: #10b981;">\${r.categoryTotals.native_summary ? r.categoryTotals.native_summary.netNativeChangeFormatted : '0.0000 PHAROS'}</strong>
+            </span>
           </div>
 
           <div class="categories-grid">
             <div class="cat-card">
               <div class="cat-name">Transfers In</div>
               <div class="cat-count">\${catMap['transfers_in'] ? catMap['transfers_in'].count : 0}</div>
-              <div class="cat-detail">\${r.categoryTotals.transfers_in.uniqueSenders} unique senders</div>
+              <div class="cat-detail">\${r.categoryTotals.transfers_in.nativeCount} Native (\${r.categoryTotals.transfers_in.nativeAmountFormatted}) • \${r.categoryTotals.transfers_in.erc20Count} ERC-20</div>
             </div>
             <div class="cat-card">
               <div class="cat-name">Transfers Out</div>
               <div class="cat-count">\${catMap['transfers_out'] ? catMap['transfers_out'].count : 0}</div>
-              <div class="cat-detail">\${r.categoryTotals.transfers_out.uniqueRecipients} unique recipients</div>
+              <div class="cat-detail">\${r.categoryTotals.transfers_out.nativeCount} Native (\${r.categoryTotals.transfers_out.nativeAmountFormatted}) • \${r.categoryTotals.transfers_out.erc20Count} ERC-20</div>
             </div>
             <div class="cat-card">
               <div class="cat-name">Swaps</div>
@@ -571,6 +603,7 @@ export function renderDashboardHtml(): string {
                 <tr>
                   <th>Timestamp</th>
                   <th>Category</th>
+                  <th>Asset</th>
                   <th>Finding / Details</th>
                   <th>Value</th>
                   <th>PharosScan</th>
@@ -589,8 +622,10 @@ export function renderDashboardHtml(): string {
                 <tr>
                   <th>Block</th>
                   <th>Category</th>
+                  <th>Asset</th>
                   <th>Action Summary</th>
                   <th>Amount</th>
+                  <th>Status</th>
                   <th>PharosScan</th>
                 </tr>
               </thead>
@@ -603,6 +638,41 @@ export function renderDashboardHtml(): string {
       \`;
       
       container.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function continueScan(fromBlock, toBlock) {
+      const address = document.getElementById('addressInput').value.trim();
+      const btnSubmit = document.getElementById('btnSubmit');
+      const btnText = document.getElementById('btnText');
+      const btnSpinner = document.getElementById('btnSpinner');
+
+      btnSubmit.disabled = true;
+      btnText.innerText = 'Continuing Scan...';
+      btnSpinner.style.display = 'inline-block';
+
+      try {
+        const resp = await fetch('/api/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address,
+            cursor: { fromBlock, toBlock }
+          })
+        });
+        const data = await resp.json();
+        if (data.success) {
+          renderReport(data.report);
+        } else {
+          alert('Continuation failed: ' + data.error);
+        }
+      } catch (e) {
+        alert('Continuation error: ' + e.message);
+      } finally {
+        btnSubmit.disabled = false;
+        btnText.innerText = 'Generate Audit';
+        btnSpinner.style.display = 'none';
+      }
+    }
     }
   </script>
 </body>

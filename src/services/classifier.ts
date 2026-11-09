@@ -1,102 +1,98 @@
-import { formatUnits, parseAbi, type Log } from 'viem';
-import type { 
-  ActivityItem, 
-  CategoryTotals, 
-  CategorySummary,
-  AllowanceStatus
+import { type Log } from 'viem';
+import { 
+  type ActivityItem, 
+  type CategoryTotals, 
+  type CategorySummary,
+  type AllowanceStatus,
+  type AssetType
 } from '../types.js';
 import { 
-  unpadTopicAddress, 
-  type RawLogBundle, 
+  type RawLogBundle,
   TOPIC_TRANSFER,
-  TOPIC_APPROVAL, 
-  TOPIC_APPROVAL_FOR_ALL, 
-  TOPIC_SWAP_V2, 
-  TOPIC_SWAP_V3 
+  TOPIC_APPROVAL,
+  TOPIC_APPROVAL_FOR_ALL,
+  TOPIC_SWAP_V2,
+  TOPIC_SWAP_V3,
+  unpadTopicAddress
 } from './activityFetcher.js';
-import { rpcClient } from './rpc.js';
+import { rpcClient, pharosAtlantic } from './rpc.js';
 
-const EXPLORER_BASE = process.env.PHAROS_EXPLORER_URL || 'https://atlantic.pharosscan.com';
-const INFINITE_APPROVAL_THRESHOLD = 2n ** 128n;
+export const INFINITE_APPROVAL_THRESHOLD = 2n ** 128n;
+const EXPLORER_BASE = pharosAtlantic.blockExplorers?.default.url || 'https://atlantic.pharosscan.com';
 
-const ERC20_ALLOWANCE_ABI = parseAbi([
-  'function allowance(address owner, address spender) view returns (uint256)'
-]);
-
-// Known token metadata on Pharos Atlantic Testnet
 const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number }> = {
-  '0x4200000000000000000000000000000000000006': { symbol: 'WPHAROS', decimals: 18 },
-  '0x524b0b76e5d83c27e8d7bb54c9d5fc1dc78b97d0': { symbol: 'USDT', decimals: 6 },
-  '0x72cb25026ff7328bfbb740e5564b735231c618ce': { symbol: 'USDC', decimals: 6 },
   '0x6db622c53f0904e4a177cd87703be1ae8e4bad1e': { symbol: 'ATL-ERC20', decimals: 18 },
+  '0x41040230bce1bb36248fb799d968f6fa087606e0': { symbol: 'WPHAROS', decimals: 18 },
+  '0xf37815a784c5a97b7319ecb89a8f0e34aafd472a': { symbol: 'USDC-TEST', decimals: 6 },
+  '0xb691f00682feef63bc73f41c380ff648d73c6a2c': { symbol: 'ATL-TEST', decimals: 18 },
 };
 
-export function formatTokenAmount(rawHexOrBigInt: string | bigint, decimals: number = 18): string {
-  try {
-    const val = typeof rawHexOrBigInt === 'bigint' ? rawHexOrBigInt : BigInt(rawHexOrBigInt);
-    if (val >= INFINITE_APPROVAL_THRESHOLD) {
-      return 'Unlimited (MAX)';
-    }
-    const formatted = formatUnits(val, decimals);
-    const parts = formatted.split('.');
-    if (parts.length === 2 && parts[1].length > 4) {
-      return `${parts[0]}.${parts[1].slice(0, 4)}`;
-    }
-    return formatted;
-  } catch {
-    return '0';
-  }
+export function formatTokenAmount(raw: bigint, decimals: number = 18): string {
+  if (raw === 0n) return '0.0000';
+  const isNegative = raw < 0n;
+  const abs = isNegative ? -raw : raw;
+  const divisor = 10n ** BigInt(decimals);
+  const integerPart = abs / divisor;
+  const fractionalPart = abs % divisor;
+  const fracStr = fractionalPart.toString().padStart(decimals, '0').slice(0, 4);
+  return `${isNegative ? '-' : ''}${integerPart.toString()}.${fracStr}`;
 }
 
-/**
- * Check current on-chain allowance via eth_call
- */
 export async function checkCurrentAllowance(
   tokenAddress: `0x${string}`,
-  owner: `0x${string}`,
-  spender: `0x${string}`,
-  isHistoricallyUnlimited: boolean
+  owner: string,
+  spender: string,
+  historicalUnlimited: boolean
 ): Promise<{ status: AllowanceStatus; currentRaw?: string }> {
   try {
-    const currentVal = await rpcClient.readContract({
+    const rawAllowance = await rpcClient.readContract({
       address: tokenAddress,
-      abi: ERC20_ALLOWANCE_ABI,
+      abi: [
+        {
+          name: 'allowance',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [
+            { name: 'owner', type: 'address' },
+            { name: 'spender', type: 'address' }
+          ],
+          outputs: [{ name: '', type: 'uint256' }],
+        }
+      ],
       functionName: 'allowance',
-      args: [owner, spender],
-    });
+      args: [owner as `0x${string}`, spender as `0x${string}`],
+    }) as bigint;
 
-    const isCurrentUnlimited = currentVal >= INFINITE_APPROVAL_THRESHOLD;
-
-    if (isCurrentUnlimited) {
-      return { status: 'Current unlimited allowance verified', currentRaw: currentVal.toString() };
-    } else if (isHistoricallyUnlimited) {
-      return { status: 'Current allowance reduced or revoked', currentRaw: currentVal.toString() };
+    if (rawAllowance >= INFINITE_APPROVAL_THRESHOLD) {
+      return { status: 'Current unlimited allowance verified', currentRaw: rawAllowance.toString() };
     } else {
-      return { status: 'Current unlimited allowance verified', currentRaw: currentVal.toString() };
+      return { status: 'Current allowance reduced or revoked', currentRaw: rawAllowance.toString() };
     }
   } catch {
-    return { status: 'Current allowance unavailable or unverified' };
+    return {
+      status: historicalUnlimited 
+        ? 'Historical unlimited approval observed' 
+        : 'Current allowance unavailable or unverified'
+    };
   }
 }
 
 export async function classifyActivities(
-  targetAddress: string,
   bundle: RawLogBundle,
-  blockTimestamps: Map<number, number>
+  targetAddress: string,
+  blockTimestamps: Map<number, number> = new Map()
 ): Promise<{
   allActivities: ActivityItem[];
-  notableTransactions: ActivityItem[];
   categoryTotals: CategoryTotals;
   categorySummaries: CategorySummary[];
-  uniqueTransactionsCount: number;
-  uniqueEventsCount: number;
+  notableTransactions: ActivityItem[];
 }> {
-  const normTarget = targetAddress.toLowerCase() as `0x${string}`;
+  const normTarget = targetAddress.toLowerCase();
   const allActivities: ActivityItem[] = [];
   const processedEventKeys = new Set<string>();
   const swapTxHashes = new Set<string>();
 
-  // 1. Process Genuine Swaps (Defensive verification of Topic 0)
+  // 1. Process Genuine Swaps (Uniswap V2 / V3)
   const validSwapLogs: Log[] = [];
   for (const log of [...bundle.swapsV2, ...bundle.swapsV3]) {
     const txHash = String(log.transactionHash || '0x');
@@ -107,19 +103,12 @@ export async function classifyActivities(
     const isV2 = topic0 === TOPIC_SWAP_V2.toLowerCase();
     const isV3 = topic0 === TOPIC_SWAP_V3.toLowerCase();
 
-    // DEFENSIVE CHECK: Must strictly match canonical Swap signatures
-    if (!isV2 && !isV3) {
-      continue;
-    }
+    if (!isV2 && !isV3) continue;
 
-    // Target must be involved as sender or recipient
     const sender = log.topics[1] ? unpadTopicAddress(log.topics[1]) : '';
     const recipient = log.topics[2] ? unpadTopicAddress(log.topics[2]) : '';
 
-    if (sender !== normTarget && recipient !== normTarget) {
-      // Unrelated party swap log
-      continue;
-    }
+    if (sender !== normTarget && recipient !== normTarget) continue;
 
     processedEventKeys.add(eventKey);
     validSwapLogs.push(log);
@@ -141,6 +130,10 @@ export async function classifyActivities(
       description: `Automated Market Maker swap order involving pool contract ${log.address}.`,
       from: sender || log.address.toLowerCase(),
       to: recipient || normTarget,
+      assetType: 'ERC20',
+      isNative: false,
+      isContractCall: true,
+      status: 'SUCCESS',
       tokenAddress: log.address.toLowerCase(),
       tokenSymbol: 'LP-POOL',
       isNotable: true,
@@ -149,7 +142,7 @@ export async function classifyActivities(
     });
   }
 
-  // 2. Process Genuine ERC-20 Approvals (Defensive verification)
+  // 2. Process Genuine ERC-20 Approvals
   let unlimitedApprovals = 0;
   let currentVerifiedUnlimited = 0;
   let currentReducedOrRevoked = 0;
@@ -161,21 +154,13 @@ export async function classifyActivities(
     if (processedEventKeys.has(eventKey)) continue;
 
     const topic0 = (log.topics[0] || '').toLowerCase();
-    // DEFENSIVE CHECK: Must strictly match canonical ERC-20 Approval topic
-    if (topic0 !== TOPIC_APPROVAL.toLowerCase()) {
-      continue;
-    }
+    if (topic0 !== TOPIC_APPROVAL.toLowerCase()) continue;
 
-    // Owner must be target
     const owner = log.topics[1] ? unpadTopicAddress(log.topics[1]) : '';
-    if (owner !== normTarget) {
-      continue;
-    }
+    if (owner !== normTarget) continue;
 
     const spender = log.topics[2] ? (unpadTopicAddress(log.topics[2]) as `0x${string}`) : ('0x0' as `0x${string}`);
-    if (spender === '0x0' || spender.length !== 42) {
-      continue; // invalid spender
-    }
+    if (spender === '0x0' || spender.length !== 42) continue;
 
     processedEventKeys.add(eventKey);
 
@@ -193,7 +178,6 @@ export async function classifyActivities(
     const tokenMeta = KNOWN_TOKENS[log.address.toLowerCase()] || { symbol: 'ERC-20', decimals: 18 };
     const formattedAmt = isHistoricalUnlimited ? 'Unlimited' : formatTokenAmount(rawVal, tokenMeta.decimals);
 
-    // Perform live on-chain check of current allowance
     const allowanceCheck = await checkCurrentAllowance(
       log.address.toLowerCase() as `0x${string}`,
       normTarget,
@@ -226,6 +210,10 @@ export async function classifyActivities(
       description: `Target wallet approved spender ${spender.slice(0, 8)}...${spender.slice(-6)} for ${formattedAmt} ${tokenMeta.symbol}. [${allowanceCheck.status}]`,
       from: normTarget,
       to: spender,
+      assetType: 'ERC20',
+      isNative: false,
+      isContractCall: true,
+      status: 'SUCCESS',
       tokenAddress: log.address.toLowerCase(),
       tokenSymbol: tokenMeta.symbol,
       rawAmount: rawVal.toString(),
@@ -238,7 +226,7 @@ export async function classifyActivities(
     });
   }
 
-  // 3. Process ApprovalForAll (Classified under Contract Interactions as NFT Operator Approval)
+  // 3. Process ApprovalForAll (NFT Operator Delegations under Contract Interactions)
   for (const log of bundle.approvalsForAll) {
     const txHash = String(log.transactionHash || '0x');
     const eventKey = `${txHash.toLowerCase()}-${log.logIndex}`;
@@ -268,6 +256,10 @@ export async function classifyActivities(
       description: `Target authorized operator ${operator.slice(0, 8)}...${operator.slice(-6)} on contract ${log.address}.`,
       from: normTarget,
       to: operator,
+      assetType: 'ERC721',
+      isNative: false,
+      isContractCall: true,
+      status: 'SUCCESS',
       tokenAddress: log.address.toLowerCase(),
       tokenSymbol: 'NFT',
       formattedAmount: 'Full Collection Authorization',
@@ -277,7 +269,7 @@ export async function classifyActivities(
     });
   }
 
-  // 4. Process Genuine Inbound Transfers (Defensive verification)
+  // 4. Process Genuine Inbound ERC-20 Transfers
   for (const log of bundle.transfersIn) {
     const txHash = String(log.transactionHash || '0x');
     const eventKey = `${txHash.toLowerCase()}-${log.logIndex}`;
@@ -303,7 +295,6 @@ export async function classifyActivities(
     }
     const formattedAmt = formatTokenAmount(rawVal, tokenMeta.decimals);
     const isWhale = rawVal > 1000n * (10n ** BigInt(tokenMeta.decimals));
-
     const isSelfTransfer = fromAddr.toLowerCase() === normTarget;
 
     allActivities.push({
@@ -320,6 +311,10 @@ export async function classifyActivities(
         : `Received ${formattedAmt} ${tokenMeta.symbol} from ${fromAddr.slice(0, 8)}...${fromAddr.slice(-6)}.`,
       from: fromAddr,
       to: normTarget,
+      assetType: 'ERC20',
+      isNative: false,
+      isContractCall: false,
+      status: 'SUCCESS',
       tokenAddress: log.address.toLowerCase(),
       tokenSymbol: tokenMeta.symbol,
       rawAmount: rawVal.toString(),
@@ -331,7 +326,7 @@ export async function classifyActivities(
     });
   }
 
-  // 5. Process Genuine Outbound Transfers (Defensive verification)
+  // 5. Process Genuine Outbound ERC-20 Transfers
   for (const log of bundle.transfersOut) {
     const txHash = String(log.transactionHash || '0x');
     const eventKey = `${txHash.toLowerCase()}-${log.logIndex}`;
@@ -357,7 +352,6 @@ export async function classifyActivities(
     }
     const formattedAmt = formatTokenAmount(rawVal, tokenMeta.decimals);
     const isWhale = rawVal > 1000n * (10n ** BigInt(tokenMeta.decimals));
-
     const isSelfTransfer = toAddr.toLowerCase() === normTarget;
 
     allActivities.push({
@@ -374,6 +368,10 @@ export async function classifyActivities(
         : `Sent ${formattedAmt} ${tokenMeta.symbol} to ${toAddr.slice(0, 8)}...${toAddr.slice(-6)}.`,
       from: normTarget,
       to: toAddr,
+      assetType: 'ERC20',
+      isNative: false,
+      isContractCall: false,
+      status: 'SUCCESS',
       tokenAddress: log.address.toLowerCase(),
       tokenSymbol: tokenMeta.symbol,
       rawAmount: rawVal.toString(),
@@ -418,11 +416,17 @@ export async function classifyActivities(
   const categoryTotals: CategoryTotals = {
     transfers_in: {
       count: allActivities.filter(a => a.category === 'transfers_in').length,
+      nativeCount: 0,
+      erc20Count: allActivities.filter(a => a.category === 'transfers_in').length,
+      nativeAmountFormatted: '0.0000 PHAROS',
       uniqueSenders: senders.size,
       sampleTokens: Array.from(inTokens).slice(0, 5),
     },
     transfers_out: {
       count: allActivities.filter(a => a.category === 'transfers_out').length,
+      nativeCount: 0,
+      erc20Count: allActivities.filter(a => a.category === 'transfers_out').length,
+      nativeAmountFormatted: '0.0000 PHAROS',
       uniqueRecipients: recipients.size,
       sampleTokens: Array.from(outTokens).slice(0, 5),
     },
@@ -442,6 +446,13 @@ export async function classifyActivities(
       count: allActivities.filter(a => a.category === 'contract_interactions').length,
       uniqueContracts: uniqueContracts.size,
     },
+    native_summary: {
+      inboundCount: 0,
+      inboundTotalFormatted: '0.0000 PHAROS',
+      outboundCount: 0,
+      outboundTotalFormatted: '0.0000 PHAROS',
+      netNativeChangeFormatted: '0.0000 PHAROS',
+    },
   };
 
   const categorySummaries: CategorySummary[] = [
@@ -449,42 +460,40 @@ export async function classifyActivities(
       category: 'transfers_in',
       label: 'Transfers In',
       count: categoryTotals.transfers_in.count,
-      details: `${categoryTotals.transfers_in.count} inbound transactions from ${categoryTotals.transfers_in.uniqueSenders} unique senders (${categoryTotals.transfers_in.sampleTokens.join(', ') || 'None'})`,
+      details: `${categoryTotals.transfers_in.count} inbound transfers across ${senders.size} unique senders.`,
     },
     {
       category: 'transfers_out',
       label: 'Transfers Out',
       count: categoryTotals.transfers_out.count,
-      details: `${categoryTotals.transfers_out.count} outbound transactions to ${categoryTotals.transfers_out.uniqueRecipients} unique recipients (${categoryTotals.transfers_out.sampleTokens.join(', ') || 'None'})`,
+      details: `${categoryTotals.transfers_out.count} outbound transfers across ${recipients.size} unique recipients.`,
     },
     {
       category: 'swaps',
       label: 'Swaps',
       count: categoryTotals.swaps.count,
-      details: `${categoryTotals.swaps.count} decentralized exchange trades executed across liquidity pools`,
+      details: `${categoryTotals.swaps.count} decentralized exchange swap trades executed.`,
     },
     {
       category: 'token_approvals',
       label: 'Token Approvals',
       count: categoryTotals.token_approvals.count,
-      details: `${categoryTotals.token_approvals.count} token allowances granted across ${categoryTotals.token_approvals.uniqueSpenders} spenders (${categoryTotals.token_approvals.currentVerifiedUnlimited} active unlimited, ${categoryTotals.token_approvals.currentReducedOrRevoked} revoked/reduced, ${categoryTotals.token_approvals.currentUnavailable} unavailable)`,
+      details: `${categoryTotals.token_approvals.count} token allowance grants (${unlimitedApprovals} infinite allowances detected; ${currentVerifiedUnlimited} confirmed active on-chain).`,
     },
     {
       category: 'contract_interactions',
       label: 'Contract Interactions',
       count: categoryTotals.contract_interactions.count,
-      details: `${categoryTotals.contract_interactions.count} direct smart contract calls / operator authorizations`,
+      details: `${categoryTotals.contract_interactions.count} direct contract invocations and NFT operator authorizations.`,
     },
   ];
 
-  const notableTransactions = allActivities.filter(a => a.isNotable).slice(0, 20);
+  const notableTransactions = allActivities.filter(a => a.isNotable);
 
   return {
     allActivities,
-    notableTransactions,
     categoryTotals,
     categorySummaries,
-    uniqueTransactionsCount: uniqueTxHashes.size,
-    uniqueEventsCount: allActivities.length,
+    notableTransactions,
   };
 }

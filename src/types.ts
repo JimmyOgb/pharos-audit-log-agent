@@ -11,6 +11,10 @@ export type AllowanceStatus =
   | 'Current allowance reduced or revoked'
   | 'Current allowance unavailable or unverified';
 
+export type ScanCompleteness = 'COMPLETE' | 'PARTIAL' | 'FAILED';
+
+export type AssetType = 'NATIVE_PHAROS' | 'ERC20' | 'ERC721' | 'ERC1155';
+
 export interface ActivityItem {
   id: string;
   txHash: string;
@@ -23,6 +27,10 @@ export interface ActivityItem {
   description: string;
   from: string;
   to: string;
+  assetType: AssetType;
+  isNative: boolean;
+  isContractCall: boolean;
+  status: 'SUCCESS' | 'REVERTED';
   tokenAddress?: string;
   tokenSymbol?: string;
   rawAmount?: string;
@@ -42,14 +50,28 @@ export interface CategorySummary {
   details: string;
 }
 
+export interface NativeSummary {
+  inboundCount: number;
+  inboundTotalFormatted: string;
+  outboundCount: number;
+  outboundTotalFormatted: string;
+  netNativeChangeFormatted: string;
+}
+
 export interface CategoryTotals {
   transfers_in: {
     count: number;
+    nativeCount: number;
+    erc20Count: number;
+    nativeAmountFormatted: string;
     uniqueSenders: number;
     sampleTokens: string[];
   };
   transfers_out: {
     count: number;
+    nativeCount: number;
+    erc20Count: number;
+    nativeAmountFormatted: string;
     uniqueRecipients: number;
     sampleTokens: string[];
   };
@@ -69,6 +91,7 @@ export interface CategoryTotals {
     count: number;
     uniqueContracts: number;
   };
+  native_summary: NativeSummary;
 }
 
 export interface NetworkConfig {
@@ -76,6 +99,32 @@ export interface NetworkConfig {
   chainId: number;
   rpcUrl: string;
   explorerUrl: string;
+}
+
+export interface ScanCoverage {
+  requestedStartDate: string;
+  requestedEndDate: string;
+  requestedBlockSpan: number;
+  resolvedStartBlock: number;
+  resolvedEndBlock: number;
+  actualStartBlock: number;
+  actualEndBlock: number;
+  actualScannedBlocksCount: number;
+  actualStartTimestamp: number;
+  actualEndTimestamp: number;
+  actualStartDateFormatted: string;
+  actualEndDateFormatted: string;
+  completeness: ScanCompleteness;
+  isComplete: boolean;
+  omittedBlockCount: number;
+  coveragePercentage: number;
+  scannedChunksCount: number;
+  failedChunksCount: number;
+  failureReason?: string;
+  continuationCursor?: {
+    nextFromBlock: number;
+    nextToBlock: number;
+  };
 }
 
 export interface AuditReport {
@@ -87,10 +136,14 @@ export interface AuditReport {
   startBlock: number;
   endBlock: number;
   network: NetworkConfig;
+  coverage: ScanCoverage;
   summary: {
     totalTransactions: number;
     totalEvents: number;
     totalCategoriesRepresented: number;
+    scanCompleteness: ScanCompleteness;
+    nativeTransfersCount: number;
+    erc20TransfersCount: number;
     executiveSummary: string;
   };
   categorySummaries: CategorySummary[];
@@ -103,6 +156,8 @@ export interface AuditReport {
     rawLogsRetrieved: number;
     deduplicatedEventsCount: number;
     verifiedOnChain: boolean;
+    nativeTxCount: number;
+    unsupportedOrPartialNotice?: string;
   };
 }
 
@@ -111,4 +166,8 @@ export interface AuditRequest {
   startDate?: string;
   endDate?: string;
   blockSpan?: number;
+  cursor?: {
+    fromBlock: number;
+    toBlock: number;
+  };
 }
