@@ -19,7 +19,7 @@ let latestReportCache: AuditReport | null = null;
 const reportStore = new Map<string, AuditReport>();
 
 // Web Dashboard
-app.get('/', (_req: Request, res: Response) => {
+app.get(['/', '/api'], (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(renderDashboardHtml());
 });
@@ -127,3 +127,5 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     console.log(`[Pharos Audit-Log Agent] Listening on http://localhost:${PORT}`);
   });
 }
+
+export default app;
