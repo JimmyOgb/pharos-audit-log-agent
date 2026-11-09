@@ -540,15 +540,15 @@ export function renderDashboardHtml(): string {
               </div>
             </div>
             <div class="export-btns">
-              <a href="/api/export/markdown" download="audit-\${r.walletAddress.slice(2, 8)}.md" class="btn-export">
+              <button type="button" onclick="exportFile('markdown')" class="btn-export">
                 📄 Markdown (.md)
-              </a>
-              <a href="/api/export/pdf" download="audit-\${r.walletAddress.slice(2, 8)}.pdf" class="btn-export btn-export-primary">
+              </button>
+              <button type="button" onclick="exportFile('pdf')" class="btn-export btn-export-primary">
                 📑 PDF Report (.pdf)
-              </a>
-              <a href="/api/export/csv" download="audit-\${r.walletAddress.slice(2, 8)}.csv" class="btn-export">
+              </button>
+              <button type="button" onclick="exportFile('csv')" class="btn-export">
                 📊 CSV Ledger (.csv)
-              </a>
+              </button>
             </div>
           </div>
 
@@ -673,6 +673,34 @@ export function renderDashboardHtml(): string {
         btnSpinner.style.display = 'none';
       }
     }
+
+    async function exportFile(format) {
+      if (!currentReport) {
+        alert('Please generate an audit report first.');
+        return;
+      }
+      try {
+        const resp = await fetch('/api/export/' + format, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ report: currentReport })
+        });
+        if (!resp.ok) {
+          throw new Error(await resp.text());
+        }
+        const blob = await resp.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const ext = format === 'markdown' ? 'md' : format;
+        a.download = 'pharos-audit-' + currentReport.walletAddress.slice(2, 8) + '.' + ext;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Export failed: ' + err.message);
+      }
     }
   </script>
 </body>

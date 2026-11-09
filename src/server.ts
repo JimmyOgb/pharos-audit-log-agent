@@ -75,9 +75,9 @@ app.get('/api/report/latest', (_req: Request, res: Response) => {
 });
 
 // Export: Markdown
-app.get('/api/export/markdown', async (req: Request, res: Response) => {
-  const reportId = req.query.id as string;
-  const report = (reportId ? reportStore.get(reportId) : null) || latestReportCache;
+app.all('/api/export/markdown', async (req: Request, res: Response) => {
+  const reportId = (req.query.id as string) || (req.body?.id as string);
+  const report = req.body?.report || (reportId ? reportStore.get(reportId) : null) || latestReportCache;
 
   if (!report) {
     return res.status(404).send('No audit report available. Please generate a report first.');
@@ -90,9 +90,9 @@ app.get('/api/export/markdown', async (req: Request, res: Response) => {
 });
 
 // Export: CSV
-app.get('/api/export/csv', async (req: Request, res: Response) => {
-  const reportId = req.query.id as string;
-  const report = (reportId ? reportStore.get(reportId) : null) || latestReportCache;
+app.all('/api/export/csv', async (req: Request, res: Response) => {
+  const reportId = (req.query.id as string) || (req.body?.id as string);
+  const report = req.body?.report || (reportId ? reportStore.get(reportId) : null) || latestReportCache;
 
   if (!report) {
     return res.status(404).send('No audit report available. Please generate a report first.');
@@ -105,9 +105,9 @@ app.get('/api/export/csv', async (req: Request, res: Response) => {
 });
 
 // Export: PDF
-app.get('/api/export/pdf', async (req: Request, res: Response) => {
-  const reportId = req.query.id as string;
-  const report = (reportId ? reportStore.get(reportId) : null) || latestReportCache;
+app.all('/api/export/pdf', async (req: Request, res: Response) => {
+  const reportId = (req.query.id as string) || (req.body?.id as string);
+  const report = req.body?.report || (reportId ? reportStore.get(reportId) : null) || latestReportCache;
 
   if (!report) {
     return res.status(404).send('No audit report available. Please generate a report first.');
