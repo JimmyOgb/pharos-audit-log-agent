@@ -8,3 +8,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .vercel
+
+demo/*.mp4
+demo/*.mp3
+demo/raw_video/

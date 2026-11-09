@@ -1,0 +1,23 @@
+1
+00:00:00,500 --> 00:00:06,000
+Welcome to the Pharos Audit-Log Agent, an autonomous EVM compliance and accounting auditor on Pharos Atlantic Testnet.
+
+2
+00:00:06,200 --> 00:00:13,500
+Requirement one: The agent accepts any EVM wallet address and user-selected date range, deterministically resolving calendar bounds to Atlantic block heights.
+
+3
+00:00:13,800 --> 00:00:22,000
+Requirement two: The engine inspects genuine historical on-chain activity and partitions events into five distinct categories: Transfers In, Transfers Out, Swaps, Token Approvals, and Contract Calls.
+
+4
+00:00:22,300 --> 00:00:31,000
+Requirement three: The dashboard renders category totals, unique counterparties, and flags notable transactions, including DEX swaps and infinite allowance risks with direct PharosScan explorer links.
+
+5
+00:00:31,300 --> 00:00:38,000
+Requirement four: The complete verifiable report exports instantaneously as Markdown, PDF, and RFC 4180 CSV ledgers.
+
+6
+00:00:38,200 --> 00:00:44,500
+100% genuine data on Pharos Atlantic Testnet, strictly read-only with zero gas spent, deployed live on Vercel.
