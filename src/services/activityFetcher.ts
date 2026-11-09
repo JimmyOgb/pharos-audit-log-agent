@@ -6,6 +6,10 @@ export const TOPIC_APPROVAL = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291
 export const TOPIC_APPROVAL_FOR_ALL = '0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31';
 export const TOPIC_SWAP_V2 = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
 export const TOPIC_SWAP_V3 = '0xc42079f94a6350d7e6235f29174924f9d5fb2dfc5b2b1e41c4f519c629447228';
+// TestAMM SwapExecuted: SwapExecuted(bytes32 indexed sagaId, address indexed sender, address indexed tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)
+export const TOPIC_SWAP_EXECUTED = '0x126fe2d5f4d208dadcffabe2d8dcc6f4a5dd387d59d658860e2109c58e34563a';
+// TestAMM SwapUnwound: SwapUnwound(bytes32 indexed sagaId, address indexed sender, address indexed tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut, uint256 remainingUnwindable)
+export const TOPIC_SWAP_UNWOUND = '0xa1203832110e76d7d35204ed9617c380921b8b1f9ebdc66051f02fc1881dcfa1';
 
 export function padTopicAddress(address: string): `0x${string}` {
   const clean = address.toLowerCase().replace(/^0x/, '');
@@ -24,6 +28,7 @@ export interface RawLogBundle {
   approvalsForAll: Log[];
   swapsV2: Log[];
   swapsV3: Log[];
+  swapsExecuted?: Log[];
   fromBlock: bigint;
   toBlock: bigint;
   totalRawLogsRetrieved: number;
@@ -45,7 +50,11 @@ export async function fetchRawActivitiesForAddress(
     swapsV2In,
     swapsV2Out,
     swapsV3In,
-    swapsV3Out
+    swapsV3Out,
+    swapsExec1,
+    swapsExec2,
+    swapsUnwound1,
+    swapsUnwound2
   ] = await Promise.all([
     // Transfers In: Transfer(from, to=target, value)
     fetchLogsInChunks(fromBlock, toBlock, [TOPIC_TRANSFER, null, paddedAddress]),
@@ -62,7 +71,13 @@ export async function fetchRawActivitiesForAddress(
     // Swaps V3: Swap(sender, recipient=target, ...)
     fetchLogsInChunks(fromBlock, toBlock, [TOPIC_SWAP_V3, null, paddedAddress]),
     // Swaps V3: Swap(sender=target, ...)
-    fetchLogsInChunks(fromBlock, toBlock, [TOPIC_SWAP_V3, paddedAddress, null])
+    fetchLogsInChunks(fromBlock, toBlock, [TOPIC_SWAP_V3, paddedAddress, null]),
+    // TestAMM SwapExecuted: sender is topic 2 (or topic 1)
+    fetchLogsInChunks(fromBlock, toBlock, [TOPIC_SWAP_EXECUTED, null, paddedAddress]),
+    fetchLogsInChunks(fromBlock, toBlock, [TOPIC_SWAP_EXECUTED, paddedAddress, null]),
+    // TestAMM SwapUnwound: sender is topic 2 (or topic 1)
+    fetchLogsInChunks(fromBlock, toBlock, [TOPIC_SWAP_UNWOUND, null, paddedAddress]),
+    fetchLogsInChunks(fromBlock, toBlock, [TOPIC_SWAP_UNWOUND, paddedAddress, null])
   ]);
 
   // Combine swaps without duplicates
@@ -86,8 +101,18 @@ export async function fetchRawActivitiesForAddress(
     }
   }
 
+  const seenSwapExec = new Set<string>();
+  const swapsExecuted: Log[] = [];
+  for (const s of [...swapsExec1, ...swapsExec2, ...swapsUnwound1, ...swapsUnwound2]) {
+    const k = `${s.transactionHash}-${s.logIndex}`;
+    if (!seenSwapExec.has(k)) {
+      seenSwapExec.add(k);
+      swapsExecuted.push(s);
+    }
+  }
+
   const totalRawLogs = transfersIn.length + transfersOut.length + approvals.length + 
-    approvalsForAll.length + swapsV2.length + swapsV3.length;
+    approvalsForAll.length + swapsV2.length + swapsV3.length + swapsExecuted.length;
 
   return {
     transfersIn,
@@ -96,6 +121,7 @@ export async function fetchRawActivitiesForAddress(
     approvalsForAll,
     swapsV2,
     swapsV3,
+    swapsExecuted,
     fromBlock,
     toBlock,
     totalRawLogsRetrieved: totalRawLogs,

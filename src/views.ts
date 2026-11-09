@@ -412,6 +412,9 @@ export function renderDashboardHtml(): string {
           <button type="button" class="quick-btn" onclick="setWallet('0xE4220c4b71877bb94EB173f467ef5c5557017085')">0xE422...7085 (Target Wallet)</button>
           <button type="button" class="quick-btn" onclick="setWallet('0x89b97db15f0bc3b12c8a2e4ae8549788c0823838')">0x89b9...3838 (Positive ERC-20)</button>
           <button type="button" class="quick-btn" onclick="setWallet('0x000000000000000000000000000000000000dead')">0x0000...dead (Idle/Burn)</button>
+          <span style="font-size: 0.8rem; color: #64748b; margin-left: 0.5rem;">Date Presets:</span>
+          <button type="button" class="quick-btn" onclick="setDateRange('2026-10-15', '2026-11-09')">Active Window (Oct–Nov 2026)</button>
+          <button type="button" class="quick-btn" onclick="setDateRange('2025-09-28', '2026-11-09')">Genesis Full Range</button>
           <button type="button" class="btn-reset" onclick="clearSavedSession()" id="btnClearSession" style="display: none; margin-left: auto;">🗑️ Reset Saved Session</button>
         </div>
       </form>
@@ -473,6 +476,11 @@ export function renderDashboardHtml(): string {
 
     function setWallet(addr) {
       document.getElementById('addressInput').value = addr;
+    }
+
+    function setDateRange(start, end) {
+      document.getElementById('startDate').value = start;
+      document.getElementById('endDate').value = end;
     }
 
     function clearSavedSession() {
@@ -774,6 +782,11 @@ export function renderDashboardHtml(): string {
             body: JSON.stringify(payload)
           });
 
+          if (!resp.ok) {
+            const errBody = await resp.text();
+            throw new Error('HTTP ' + resp.status + ': ' + errBody.slice(0, 120));
+          }
+
           const data = await resp.json();
           if (data.success && data.report) {
             currentReport = data.report;
@@ -786,10 +799,13 @@ export function renderDashboardHtml(): string {
         } catch (e) {
           retries++;
           if (retries >= 3) {
-            alert('Continuation halted after retries: ' + e.message);
+            console.warn('[Audit] Continuation halted after retries:', e.message);
+            if (!isAuto) {
+              alert('Continuation halted after retries: ' + e.message);
+            }
             return false;
           }
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 1200));
         }
       }
       return false;
@@ -820,8 +836,11 @@ export function renderDashboardHtml(): string {
         }
         chunksProcessed++;
         const ok = await continueScan(true);
-        if (!ok) break;
-        await new Promise(r => setTimeout(r, 200));
+        if (!ok) {
+          console.warn('[AutoScan] Chunk step paused or encountered retry limit. Cumulative progress preserved.');
+          break;
+        }
+        await new Promise(r => setTimeout(r, 250));
       }
 
       isAutoScanning = false;

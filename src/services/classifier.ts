@@ -13,6 +13,8 @@ import {
   TOPIC_APPROVAL_FOR_ALL,
   TOPIC_SWAP_V2,
   TOPIC_SWAP_V3,
+  TOPIC_SWAP_EXECUTED,
+  TOPIC_SWAP_UNWOUND,
   unpadTopicAddress
 } from './activityFetcher.js';
 import { rpcClient, pharosAtlantic } from './rpc.js';
@@ -20,12 +22,45 @@ import { rpcClient, pharosAtlantic } from './rpc.js';
 export const INFINITE_APPROVAL_THRESHOLD = 2n ** 128n;
 const EXPLORER_BASE = pharosAtlantic.blockExplorers?.default.url || 'https://atlantic.pharosscan.com';
 
-const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number }> = {
-  '0x6db622c53f0904e4a177cd87703be1ae8e4bad1e': { symbol: 'ATL-ERC20', decimals: 18 },
-  '0x41040230bce1bb36248fb799d968f6fa087606e0': { symbol: 'WPHAROS', decimals: 18 },
-  '0xf37815a784c5a97b7319ecb89a8f0e34aafd472a': { symbol: 'USDC-TEST', decimals: 6 },
-  '0xb691f00682feef63bc73f41c380ff648d73c6a2c': { symbol: 'ATL-TEST', decimals: 18 },
-};
+const tokenMetadataCache = new Map<string, { symbol: string; decimals: number }>([
+  ['0x6396f75c03bbc44503f9c155e834dda30c947036', { symbol: 'TKA', decimals: 18 }],
+  ['0xf37815a784c5a97b7319ecb89a8f0e34aafd472a', { symbol: 'TKB', decimals: 18 }],
+  ['0x838800b758277cc111b2d48ab01e5e164f8e9471', { symbol: 'WPHRS', decimals: 18 }],
+  ['0xcfc8330f4bcab529c625d12781b1c19466a9fc8b', { symbol: 'USDC', decimals: 6 }],
+  ['0x6db622c53f0904e4a177cd87703be1ae8e4bad1e', { symbol: 'ATL-ERC20', decimals: 18 }],
+  ['0xb691f00682feef63bc73f41c380ff648d73c6a2c', { symbol: 'ATL-TEST', decimals: 18 }],
+  ['0x41040230bce1bb36248fb799d968f6fa087606e0', { symbol: 'SAGA-VAULT', decimals: 18 }],
+]);
+
+export async function resolveTokenMetadata(tokenAddress: string): Promise<{ symbol: string; decimals: number }> {
+  const norm = tokenAddress.toLowerCase();
+  if (tokenMetadataCache.has(norm)) {
+    return tokenMetadataCache.get(norm)!;
+  }
+  try {
+    const [symRes, decRes] = await Promise.all([
+      rpcClient.readContract({
+        address: norm as `0x${string}`,
+        abi: [{ name: 'symbol', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] }],
+        functionName: 'symbol',
+      }).catch(() => null),
+      rpcClient.readContract({
+        address: norm as `0x${string}`,
+        abi: [{ name: 'decimals', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] }],
+        functionName: 'decimals',
+      }).catch(() => null),
+    ]);
+    const symbol = typeof symRes === 'string' && symRes.trim().length > 0 ? symRes.trim() : 'ERC20';
+    const decimals = typeof decRes === 'number' ? decRes : 18;
+    const meta = { symbol, decimals };
+    tokenMetadataCache.set(norm, meta);
+    return meta;
+  } catch {
+    const fallback = { symbol: 'TOKEN', decimals: 18 };
+    tokenMetadataCache.set(norm, fallback);
+    return fallback;
+  }
+}
 
 export function formatTokenAmount(raw: bigint, decimals: number = 18): string {
   if (raw === 0n) return '0.0000';
@@ -92,8 +127,79 @@ export async function classifyActivities(
   const processedEventKeys = new Set<string>();
   const swapTxHashes = new Set<string>();
 
-  // 1. Process Genuine Swaps (Uniswap V2 / V3)
+  // 1. Process Genuine Swaps (TestAMM, Uniswap V2 / V3)
   const validSwapLogs: Log[] = [];
+
+  // A. Process TestAMM Swaps (SwapExecuted & SwapUnwound)
+  const testAmmLogs = bundle.swapsExecuted || [];
+  for (const log of testAmmLogs) {
+    const txHash = String(log.transactionHash || '0x');
+    const eventKey = `${txHash.toLowerCase()}-${log.logIndex}`;
+    if (processedEventKeys.has(eventKey)) continue;
+
+    const topic0 = (log.topics[0] || '').toLowerCase();
+    const isExec = topic0 === TOPIC_SWAP_EXECUTED.toLowerCase();
+    const isUnwound = topic0 === TOPIC_SWAP_UNWOUND.toLowerCase();
+    if (!isExec && !isUnwound) continue;
+
+    // Sender is indexed in topic 2 (or topic 1)
+    const sender = log.topics[2] ? unpadTopicAddress(log.topics[2]) : (log.topics[1] ? unpadTopicAddress(log.topics[1]) : '');
+    if (sender !== normTarget) continue;
+
+    processedEventKeys.add(eventKey);
+    validSwapLogs.push(log);
+    swapTxHashes.add(txHash.toLowerCase());
+
+    const blockNum = Number(log.blockNumber || 0n);
+    const timestamp = blockTimestamps.get(blockNum) || Math.floor(Date.now() / 1000);
+
+    const tokenInAddr = log.topics[3] ? unpadTopicAddress(log.topics[3]) : '0x0';
+    let tokenOutAddr = '0x0';
+    let rawAmountIn = 0n;
+    let rawAmountOut = 0n;
+
+    if (log.data && log.data.length >= 194) {
+      tokenOutAddr = ('0x' + log.data.slice(26, 66)).toLowerCase();
+      try { rawAmountIn = BigInt('0x' + log.data.slice(66, 130)); } catch {}
+      try { rawAmountOut = BigInt('0x' + log.data.slice(130, 194)); } catch {}
+    }
+
+    const [metaIn, metaOut] = await Promise.all([
+      resolveTokenMetadata(tokenInAddr),
+      resolveTokenMetadata(tokenOutAddr),
+    ]);
+
+    const formattedIn = formatTokenAmount(rawAmountIn, metaIn.decimals);
+    const formattedOut = formatTokenAmount(rawAmountOut, metaOut.decimals);
+    const actionLabel = isUnwound ? 'TestAMM Unwind' : 'TestAMM 1:1 Swap';
+
+    allActivities.push({
+      id: eventKey,
+      txHash,
+      blockNumber: blockNum,
+      timestamp,
+      dateFormatted: new Date(timestamp * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC',
+      category: 'swaps',
+      categoryLabel: 'Swaps',
+      title: `${actionLabel} (${formattedIn} ${metaIn.symbol} → ${formattedOut} ${metaOut.symbol})`,
+      description: `Executed AMM trade on TestAMM Router (${log.address.toLowerCase()}). Swapped ${formattedIn} ${metaIn.symbol} for ${formattedOut} ${metaOut.symbol}.`,
+      from: normTarget,
+      to: log.address.toLowerCase(),
+      assetType: 'ERC20',
+      isNative: false,
+      isContractCall: true,
+      status: 'SUCCESS',
+      tokenAddress: log.address.toLowerCase(),
+      tokenSymbol: `${metaIn.symbol}/${metaOut.symbol}`,
+      rawAmount: rawAmountIn.toString(),
+      formattedAmount: `${formattedIn} ${metaIn.symbol} → ${formattedOut} ${metaOut.symbol}`,
+      isNotable: true,
+      notableReason: `${actionLabel} execution on TestAMM Router: ${formattedIn} ${metaIn.symbol} for ${formattedOut} ${metaOut.symbol}`,
+      explorerUrl: `${EXPLORER_BASE}/tx/${txHash}`,
+    });
+  }
+
+  // B. Process Uniswap V2 / V3 Pool Swaps
   for (const log of [...bundle.swapsV2, ...bundle.swapsV3]) {
     const txHash = String(log.transactionHash || '0x');
     const eventKey = `${txHash.toLowerCase()}-${log.logIndex}`;
@@ -142,6 +248,81 @@ export async function classifyActivities(
     });
   }
 
+  // C. Transaction-Level AMM Swap Synthesis (Transfers pairing heuristic)
+  // For transactions that call an AMM router where user sends token A and receives token B
+  const outByTx = new Map<string, Log[]>();
+  for (const log of bundle.transfersOut) {
+    const tx = String(log.transactionHash || '0x').toLowerCase();
+    if (!outByTx.has(tx)) outByTx.set(tx, []);
+    outByTx.get(tx)!.push(log);
+  }
+  const inByTx = new Map<string, Log[]>();
+  for (const log of bundle.transfersIn) {
+    const tx = String(log.transactionHash || '0x').toLowerCase();
+    if (!inByTx.has(tx)) inByTx.set(tx, []);
+    inByTx.get(tx)!.push(log);
+  }
+
+  for (const [txHash, outLogs] of outByTx.entries()) {
+    if (swapTxHashes.has(txHash)) continue;
+    const inLogs = inByTx.get(txHash);
+    if (!inLogs || inLogs.length === 0) continue;
+
+    // Check if counterpart is an AMM or mutual contract
+    const outLog = outLogs[0];
+    const inLog = inLogs[0];
+    const recipient = outLog.topics[2] ? unpadTopicAddress(outLog.topics[2]) : '';
+    const sender = inLog.topics[1] ? unpadTopicAddress(inLog.topics[1]) : '';
+
+    // If both legs interface with the same contract address (e.g. TestAMM router 0x5302b3...)
+    if (recipient && sender && recipient.toLowerCase() === sender.toLowerCase()) {
+      const blockNum = Number(outLog.blockNumber || 0n);
+      const timestamp = blockTimestamps.get(blockNum) || Math.floor(Date.now() / 1000);
+      const synthKey = `${txHash}-synth-swap`;
+      if (processedEventKeys.has(synthKey)) continue;
+      processedEventKeys.add(synthKey);
+      swapTxHashes.add(txHash);
+
+      const [metaIn, metaOut] = await Promise.all([
+        resolveTokenMetadata(outLog.address),
+        resolveTokenMetadata(inLog.address),
+      ]);
+
+      let valIn = 0n;
+      let valOut = 0n;
+      try { valIn = BigInt(outLog.data); } catch {}
+      try { valOut = BigInt(inLog.data); } catch {}
+
+      const fmtIn = formatTokenAmount(valIn, metaIn.decimals);
+      const fmtOut = formatTokenAmount(valOut, metaOut.decimals);
+
+      allActivities.push({
+        id: synthKey,
+        txHash,
+        blockNumber: blockNum,
+        timestamp,
+        dateFormatted: new Date(timestamp * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC',
+        category: 'swaps',
+        categoryLabel: 'Swaps',
+        title: `DEX Swap (${fmtIn} ${metaIn.symbol} → ${fmtOut} ${metaOut.symbol})`,
+        description: `Token swap settlement through DEX router/contract ${recipient}. Swapped ${fmtIn} ${metaIn.symbol} for ${fmtOut} ${metaOut.symbol}.`,
+        from: normTarget,
+        to: recipient,
+        assetType: 'ERC20',
+        isNative: false,
+        isContractCall: true,
+        status: 'SUCCESS',
+        tokenAddress: recipient,
+        tokenSymbol: `${metaIn.symbol}/${metaOut.symbol}`,
+        rawAmount: valIn.toString(),
+        formattedAmount: `${fmtIn} ${metaIn.symbol} → ${fmtOut} ${metaOut.symbol}`,
+        isNotable: true,
+        notableReason: `DEX token swap via router ${recipient.slice(0, 10)}...: ${fmtIn} ${metaIn.symbol} → ${fmtOut} ${metaOut.symbol}`,
+        explorerUrl: `${EXPLORER_BASE}/tx/${txHash}`,
+      });
+    }
+  }
+
   // 2. Process Genuine ERC-20 Approvals
   let unlimitedApprovals = 0;
   let currentVerifiedUnlimited = 0;
@@ -175,7 +356,7 @@ export async function classifyActivities(
     const isHistoricalUnlimited = rawVal >= INFINITE_APPROVAL_THRESHOLD;
     if (isHistoricalUnlimited) unlimitedApprovals++;
 
-    const tokenMeta = KNOWN_TOKENS[log.address.toLowerCase()] || { symbol: 'ERC-20', decimals: 18 };
+    const tokenMeta = await resolveTokenMetadata(log.address);
     const formattedAmt = isHistoricalUnlimited ? 'Unlimited' : formatTokenAmount(rawVal, tokenMeta.decimals);
 
     const allowanceCheck = await checkCurrentAllowance(
@@ -287,7 +468,7 @@ export async function classifyActivities(
     const isSwapComp = swapTxHashes.has(txHash.toLowerCase());
     const blockNum = Number(log.blockNumber || 0n);
     const timestamp = blockTimestamps.get(blockNum) || Math.floor(Date.now() / 1000);
-    const tokenMeta = KNOWN_TOKENS[log.address.toLowerCase()] || { symbol: 'TOKEN', decimals: 18 };
+    const tokenMeta = await resolveTokenMetadata(log.address);
 
     let rawVal = 0n;
     if (log.data && log.data !== '0x') {
@@ -304,11 +485,17 @@ export async function classifyActivities(
       timestamp,
       dateFormatted: new Date(timestamp * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC',
       category: 'transfers_in',
-      categoryLabel: isSelfTransfer ? 'Self-Transfer (Inbound)' : 'Transfers In',
-      title: isSelfTransfer ? `Self-Transfer Inbound (${formattedAmt} ${tokenMeta.symbol})` : `Inbound Transfer (${formattedAmt} ${tokenMeta.symbol})`,
+      categoryLabel: isSelfTransfer 
+        ? 'Self-Transfer (Inbound)' 
+        : (isSwapComp ? 'Transfers In (Swap Leg)' : 'Transfers In'),
+      title: isSelfTransfer 
+        ? `Self-Transfer Inbound (${formattedAmt} ${tokenMeta.symbol})` 
+        : (isSwapComp ? `Inbound Swap Leg (${formattedAmt} ${tokenMeta.symbol})` : `Inbound Transfer (${formattedAmt} ${tokenMeta.symbol})`),
       description: isSelfTransfer
         ? `Self-transfer of ${formattedAmt} ${tokenMeta.symbol} within target wallet.`
-        : `Received ${formattedAmt} ${tokenMeta.symbol} from ${fromAddr.slice(0, 8)}...${fromAddr.slice(-6)}.`,
+        : (isSwapComp
+          ? `Received ${formattedAmt} ${tokenMeta.symbol} as settlement output from DEX swap (${fromAddr.slice(0, 8)}...${fromAddr.slice(-6)}).`
+          : `Received ${formattedAmt} ${tokenMeta.symbol} from ${fromAddr.slice(0, 8)}...${fromAddr.slice(-6)}.`),
       from: fromAddr,
       to: normTarget,
       assetType: 'ERC20',
@@ -344,7 +531,7 @@ export async function classifyActivities(
     const isSwapComp = swapTxHashes.has(txHash.toLowerCase());
     const blockNum = Number(log.blockNumber || 0n);
     const timestamp = blockTimestamps.get(blockNum) || Math.floor(Date.now() / 1000);
-    const tokenMeta = KNOWN_TOKENS[log.address.toLowerCase()] || { symbol: 'TOKEN', decimals: 18 };
+    const tokenMeta = await resolveTokenMetadata(log.address);
 
     let rawVal = 0n;
     if (log.data && log.data !== '0x') {
@@ -361,11 +548,17 @@ export async function classifyActivities(
       timestamp,
       dateFormatted: new Date(timestamp * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC',
       category: 'transfers_out',
-      categoryLabel: isSelfTransfer ? 'Self-Transfer (Outbound)' : 'Transfers Out',
-      title: isSelfTransfer ? `Self-Transfer Outbound (${formattedAmt} ${tokenMeta.symbol})` : `Outbound Transfer (${formattedAmt} ${tokenMeta.symbol})`,
+      categoryLabel: isSelfTransfer 
+        ? 'Self-Transfer (Outbound)' 
+        : (isSwapComp ? 'Transfers Out (Swap Leg)' : 'Transfers Out'),
+      title: isSelfTransfer 
+        ? `Self-Transfer Outbound (${formattedAmt} ${tokenMeta.symbol})` 
+        : (isSwapComp ? `Outbound Swap Leg (${formattedAmt} ${tokenMeta.symbol})` : `Outbound Transfer (${formattedAmt} ${tokenMeta.symbol})`),
       description: isSelfTransfer
         ? `Self-transfer of ${formattedAmt} ${tokenMeta.symbol} within target wallet.`
-        : `Sent ${formattedAmt} ${tokenMeta.symbol} to ${toAddr.slice(0, 8)}...${toAddr.slice(-6)}.`,
+        : (isSwapComp
+          ? `Sent ${formattedAmt} ${tokenMeta.symbol} as input to DEX swap (${toAddr.slice(0, 8)}...${toAddr.slice(-6)}).`
+          : `Sent ${formattedAmt} ${tokenMeta.symbol} to ${toAddr.slice(0, 8)}...${toAddr.slice(-6)}.`),
       from: normTarget,
       to: toAddr,
       assetType: 'ERC20',

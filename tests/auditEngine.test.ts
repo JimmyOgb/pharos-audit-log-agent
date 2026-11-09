@@ -10,6 +10,7 @@ import {
   TOPIC_APPROVAL_FOR_ALL, 
   TOPIC_SWAP_V2, 
   TOPIC_SWAP_V3,
+  TOPIC_SWAP_EXECUTED,
   padTopicAddress,
   type RawLogBundle
 } from '../src/services/activityFetcher.js';
@@ -736,7 +737,124 @@ async function runTests() {
   assert(genesisReport.summary.executiveSummary.includes('require continuation scanning before the wallet can be certified idle'));
   console.log('  ✔ Truthful executive summary verified: wallet is not certified idle until full interval is covered.');
 
-  console.log('\n🎉 ALL 38 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
+  // ====================================================
+  // SECTION 7: MISSING SWAP & POSITIVE CONTROL REMEDIATION (Tests 39 - 44)
+  // ====================================================
+  console.log('\n--- SECTION 7: Missing Swap & Positive Control Remediation ---');
+
+  // Test 39: TestAMM SwapExecuted event classification
+  console.log('Test 39: TestAMM SwapExecuted event classified under swaps');
+  const testAmmBundle: RawLogBundle = {
+    transfersIn: [{
+      address: '0xf37815a784c5a97b7319ecb89a8f0e34aafd472a',
+      blockNumber: 31674475n,
+      logIndex: 1,
+      data: '0x0000000000000000000000000000000000000000000000056bc75e2d63100000',
+      topics: [
+        TOPIC_TRANSFER as `0x${string}`,
+        padTopicAddress('0x5302b3cc1d7741dc6bf506349a51355e10b9de1d'),
+        padTopicAddress(testWallet),
+      ],
+      transactionHash: '0x1123d411185a0d5d3120eb7895ebad3a6718f78cd3a2d8f022b16f1bc3e0675a' as `0x${string}`,
+    } as any],
+    transfersOut: [{
+      address: '0x6396f75c03bbc44503f9c155e834dda30c947036',
+      blockNumber: 31674475n,
+      logIndex: 0,
+      data: '0x0000000000000000000000000000000000000000000000056bc75e2d63100000',
+      topics: [
+        TOPIC_TRANSFER as `0x${string}`,
+        padTopicAddress(testWallet),
+        padTopicAddress('0x5302b3cc1d7741dc6bf506349a51355e10b9de1d'),
+      ],
+      transactionHash: '0x1123d411185a0d5d3120eb7895ebad3a6718f78cd3a2d8f022b16f1bc3e0675a' as `0x${string}`,
+    } as any],
+    approvals: [],
+    approvalsForAll: [],
+    swapsV2: [],
+    swapsV3: [],
+    swapsExecuted: [{
+      address: '0x5302b3cc1d7741dc6bf506349a51355e10b9de1d',
+      blockNumber: 31674475n,
+      logIndex: 2,
+      data: '0x000000000000000000000000f37815a784c5a97b7319ecb89a8f0e34aafd472a0000000000000000000000000000000000000000000000056bc75e2d631000000000000000000000000000000000000000000000000000056bc75e2d63100000',
+      topics: [
+        TOPIC_SWAP_EXECUTED as `0x${string}`,
+        '0xc528e75f1ab5c3ac8cace031bf7207e1a1ad1a99989dad1ad6a7da7168b45fad' as `0x${string}`,
+        padTopicAddress(testWallet),
+        padTopicAddress('0x6396f75c03bbc44503f9c155e834dda30c947036'),
+      ],
+      transactionHash: '0x1123d411185a0d5d3120eb7895ebad3a6718f78cd3a2d8f022b16f1bc3e0675a' as `0x${string}`,
+    } as any],
+    fromBlock: 31674475n,
+    toBlock: 31674475n,
+    totalRawLogsRetrieved: 3,
+  };
+
+  const testAmmClassified = await classifyActivities(testAmmBundle, testWallet);
+  assert.strictEqual(testAmmClassified.categoryTotals.swaps.count, 1, 'Must detect exactly 1 AMM swap');
+  const swapAct = testAmmClassified.allActivities.find(a => a.category === 'swaps');
+  assert(swapAct !== undefined, 'Swap activity must be in allActivities');
+  assert(swapAct.title.includes('TestAMM 1:1 Swap'), 'Must label as TestAMM Swap');
+  assert(swapAct.formattedAmount?.includes('TKA') && swapAct.formattedAmount?.includes('TKB'), 'Must show TKA -> TKB');
+  console.log('  ✔ TestAMM SwapExecuted successfully classified under swaps.');
+
+  // Test 40: Target wallet positive-control swap detected via generateAuditReport
+  console.log('\nTest 40: Target wallet positive-control swap in block 31674475 detected');
+  const swapRep = await generateAuditReport({
+    address: testWallet,
+    cursor: { fromBlock: 31674470, toBlock: 31674480 },
+  });
+  assert(swapRep.categoryTotals.swaps.count >= 1, 'Must detect at least 1 swap');
+  const liveSwap = swapRep.allActivities.find(a => a.category === 'swaps');
+  assert(liveSwap !== undefined, 'Live swap activity must exist');
+  assert.strictEqual(liveSwap.txHash, '0x1123d411185a0d5d3120eb7895ebad3a6718f78cd3a2d8f022b16f1bc3e0675a');
+  console.log('  ✔ Positive-control AMM swap (0x1123d411...) successfully detected.');
+
+  // Test 41: Accurate token decimals (TKB is 18 decimals, not 6; amount is 100, not 100 trillion)
+  console.log('\nTest 41: Token decimals resolution prevents 100-trillion amount corruption');
+  const inboundLeg = swapRep.allActivities.find(a => a.category === 'transfers_in' && a.txHash === '0x1123d411185a0d5d3120eb7895ebad3a6718f78cd3a2d8f022b16f1bc3e0675a');
+  assert(inboundLeg !== undefined);
+  assert.strictEqual(inboundLeg.formattedAmount, '100.0000', '100 ether units must format as 100.0000, not 100 trillion');
+  assert.strictEqual(inboundLeg.tokenSymbol, 'TKB', 'Token symbol must be TKB');
+  console.log('  ✔ Token decimals resolved: TKB decoded as 100.0000 TKB with 18 decimals.');
+
+  // Test 42: Swap component transfers annotated with isSwapComponent
+  console.log('\nTest 42: Swap component transfers annotated with isSwapComponent');
+  assert.strictEqual(inboundLeg.isSwapComponent, true, 'Inbound leg must be marked as swap component');
+  const outboundLeg = swapRep.allActivities.find(a => a.category === 'transfers_out' && a.txHash === '0x1123d411185a0d5d3120eb7895ebad3a6718f78cd3a2d8f022b16f1bc3e0675a');
+  assert(outboundLeg !== undefined);
+  assert.strictEqual(outboundLeg.isSwapComponent, true, 'Outbound leg must be marked as swap component');
+  console.log('  ✔ Swap component transfers annotated with isSwapComponent = true.');
+
+  // Test 43: Inbound native transfer detected
+  console.log('\nTest 43: Inbound native transfer detection in block 16115924');
+  const inNativeRep = await generateAuditReport({
+    address: testWallet,
+    cursor: { fromBlock: 16115920, toBlock: 16115930 },
+  });
+  const inNativeTx = inNativeRep.allActivities.find(a => a.txHash === '0xa3df2f7c5f17ce80ad099c3d65f08236003ab7016fa5d49ce783664e8908ecc4');
+  assert(inNativeTx !== undefined, 'Inbound native transfer must be detected');
+  assert.strictEqual(inNativeTx.category, 'transfers_in');
+  assert.strictEqual(inNativeTx.isNative, true);
+  assert.strictEqual(inNativeTx.formattedAmount, '0.0100 PHAROS');
+  console.log('  ✔ Inbound native transfer (0xa3df2f7c... [0.0100 PHAROS]) successfully detected.');
+
+  // Test 44: Complete Positive-Control Matrix Verification
+  console.log('\nTest 44: Complete Positive-Control Matrix Verification (5/5 Activities)');
+  // 1. Native Out: 0xbc630230... (block 32463702) -> transfers_out
+  // 2. Native In: 0xa3df2f7c... (block 16115924) -> transfers_in
+  // 3. ERC-20 Out: 0x1123d411... log 0 (block 31674475) -> transfers_out (Swap Leg)
+  // 4. ERC-20 In: 0x1123d411... log 1 (block 31674475) -> transfers_in (Swap Leg)
+  // 5. AMM Swap: 0x1123d411... log 2 (block 31674475) -> swaps
+  assert(histTx !== undefined && histTx.category === 'transfers_out');
+  assert(inNativeTx !== undefined && inNativeTx.category === 'transfers_in');
+  assert(outboundLeg !== undefined && outboundLeg.category === 'transfers_out');
+  assert(inboundLeg !== undefined && inboundLeg.category === 'transfers_in');
+  assert(liveSwap !== undefined && liveSwap.category === 'swaps');
+  console.log('  ✔ Positive-control matrix: all 5 activity types verified on-chain and classified correctly.');
+
+  console.log('\n🎉 ALL 44 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
 }
 
 runTests().catch((err) => {

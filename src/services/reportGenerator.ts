@@ -25,6 +25,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     approvalsForAll: [],
     swapsV2: [],
     swapsV3: [],
+    swapsExecuted: [],
   };
 
   // 2. Query live on-chain logs across the block range using direct JSON-RPC serialization
@@ -46,7 +47,8 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     ...rawLogsBundle.approvals,
     ...rawLogsBundle.approvalsForAll,
     ...rawLogsBundle.swapsV2,
-    ...rawLogsBundle.swapsV3
+    ...rawLogsBundle.swapsV3,
+    ...(rawLogsBundle.swapsExecuted || []),
   ]) {
     if (log.blockNumber) uniqueBlocks.add(Number(log.blockNumber));
   }
@@ -184,7 +186,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     } else if (act.category === 'token_approvals') {
       spenders.add(act.to);
     } else if (act.category === 'swaps') {
-      dexProtocols.add('Uniswap / AMM Pool');
+      dexProtocols.add(act.title.includes('TestAMM') ? 'TestAMM Router' : (act.title.includes('Uniswap V3') ? 'Uniswap V3' : 'Uniswap / AMM Pool'));
     }
   }
 

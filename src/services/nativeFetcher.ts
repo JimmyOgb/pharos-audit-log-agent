@@ -86,10 +86,44 @@ export async function fetchNativeTransactions(
     }
   }
 
-  // 2. Fetch full blocks for discovered outbound transitions
+  // 2. Fetch full blocks for discovered outbound transitions and incoming balance increases
   const blocksToFetch = new Set<bigint>();
   for (const item of discoveredTxBlocks) {
     blocksToFetch.add(item.blockNumber);
+  }
+
+  // 2b. Check Balance Delta to discover Inbound Native Transfers
+  try {
+    const queryFromBlock = fromBlock > 0n ? fromBlock - 1n : 0n;
+    const [startBal, endBal] = await Promise.all([
+      rpcClient.getBalance({ address: target as `0x${string}`, blockNumber: queryFromBlock }),
+      rpcClient.getBalance({ address: target as `0x${string}`, blockNumber: toBlock }),
+    ]);
+
+    // If balance increased, at least one inbound native transfer occurred in this interval
+    if (endBal > startBal) {
+      let bLow = fromBlock;
+      let bHigh = toBlock;
+      let fundingBlock = toBlock;
+
+      while (bLow <= bHigh) {
+        const bMid = bLow + (bHigh - bLow) / 2n;
+        try {
+          const midBal = await rpcClient.getBalance({ address: target as `0x${string}`, blockNumber: bMid });
+          if (midBal > startBal) {
+            fundingBlock = bMid;
+            bHigh = bMid - 1n;
+          } else {
+            bLow = bMid + 1n;
+          }
+        } catch {
+          bLow = bMid + 1n;
+        }
+      }
+      blocksToFetch.add(fundingBlock);
+    }
+  } catch (err) {
+    // Balance check warning
   }
 
   // Also include any blocks from additional candidate hashes
