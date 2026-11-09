@@ -14,17 +14,18 @@ export function exportToMarkdown(report: AuditReport): string {
   lines.push(`**Network:** ${report.network.name} (Chain ID: \`${report.network.chainId}\`)  `);
   lines.push(`**Target Wallet:** \`${report.walletAddress}\`  `);
   lines.push(`**Audit Period:** ${report.startDate.slice(0, 10)} to ${report.endDate.slice(0, 10)} (Blocks: \`${report.startBlock}\` .. \`${report.endBlock}\`)  `);
-  lines.push(`**On-Chain Verification:** ${report.provenance.verifiedOnChain ? 'VERIFIED LIVE' : 'UNVERIFIED'}  `);
+  lines.push(`**On-Chain Verification:** ${report.provenance.verifiedOnChain ? 'VERIFIED LIVE (Read-Only)' : 'UNVERIFIED'}  `);
+  lines.push(`**Data Provenance:** ${report.provenance.rawLogsRetrieved} raw node logs retrieved, ${report.provenance.deduplicatedEventsCount} unique verified records normalized.  `);
   lines.push(``);
   lines.push(`---`);
   lines.push(``);
-  lines.push(`## 1. Executive Summary`);
+  lines.push(`## 1. Executive Compliance Summary`);
   lines.push(``);
   lines.push(report.summary.executiveSummary);
   lines.push(``);
   lines.push(`---`);
   lines.push(``);
-  lines.push(`## 2. Category Summary`);
+  lines.push(`## 2. Activity Category Breakdown`);
   lines.push(``);
   lines.push(`| Category | Count | Classification Details |`);
   lines.push(`| :--- | :--- | :--- |`);
@@ -36,17 +37,18 @@ export function exportToMarkdown(report: AuditReport): string {
   lines.push(``);
   lines.push(`---`);
   lines.push(``);
-  lines.push(`## 3. Notable Transactions`);
+  lines.push(`## 3. Notable Transactions & Risk Exposure`);
   lines.push(``);
 
   if (report.notableTransactions.length === 0) {
     lines.push(`*No notable high-value transactions or infinite allowance risks identified during this audit window.*`);
   } else {
-    lines.push(`| Date (UTC) | Block | Category | Finding / Alert | PharosScan Link |`);
+    lines.push(`| Date (UTC) | Block | Category | Finding / Risk Status | PharosScan Link |`);
     lines.push(`| :--- | :--- | :--- | :--- | :--- |`);
     for (const item of report.notableTransactions) {
       const shortHash = `${item.txHash.slice(0, 10)}...${item.txHash.slice(-8)}`;
-      lines.push(`| ${item.dateFormatted} | \`${item.blockNumber}\` | ${item.categoryLabel} | ${item.notableReason || item.title} | [${shortHash}](${item.explorerUrl}) |`);
+      const statusNote = item.allowanceStatus ? `[${item.allowanceStatus}]` : '';
+      lines.push(`| ${item.dateFormatted} | \`${item.blockNumber}\` | ${item.categoryLabel} | ${item.notableReason || item.title} ${statusNote} | [${shortHash}](${item.explorerUrl}) |`);
     }
   }
 
@@ -73,7 +75,7 @@ export function exportToMarkdown(report: AuditReport): string {
 
   lines.push(``);
   lines.push(`---`);
-  lines.push(`*Report generated automatically by Pharos Audit-Log Agent. Data source: Pharos Atlantic Testnet RPC (${report.network.rpcUrl}).*`);
+  lines.push(`*Report generated automatically by Pharos Audit-Log Agent. Data source: Pharos Atlantic Testnet RPC (${report.network.rpcUrl}). Strictly read-only on-chain verification.*`);
 
   return lines.join('\n');
 }
@@ -97,6 +99,8 @@ export function exportToCSV(report: AuditReport): string {
     'Token_Address',
     'Token_Symbol',
     'Amount',
+    'Allowance_Status',
+    'Is_Swap_Component',
     'Is_Notable',
     'Notable_Reason',
     'Tx_Hash',
@@ -128,6 +132,8 @@ export function exportToCSV(report: AuditReport): string {
       escapeCSV(item.tokenAddress || ''),
       escapeCSV(item.tokenSymbol || ''),
       escapeCSV(item.formattedAmount || ''),
+      escapeCSV(item.allowanceStatus || ''),
+      escapeCSV(Boolean(item.isSwapComponent)),
       escapeCSV(item.isNotable),
       escapeCSV(item.notableReason || ''),
       escapeCSV(item.txHash),
@@ -219,7 +225,6 @@ export function exportToPDF(report: AuditReport): Promise<Buffer> {
 
       currentY += 20;
 
-      // Check if we need a new page for Notable Transactions
       if (currentY > 650) {
         doc.addPage();
         currentY = 40;
@@ -237,7 +242,7 @@ export function exportToPDF(report: AuditReport): Promise<Buffer> {
         doc.fillColor('#1e293b').fontSize(9);
         doc.text('Block', 50, currentY + 5, { bold: true } as any);
         doc.text('Category', 110, currentY + 5, { bold: true } as any);
-        doc.text('Finding / Alert', 200, currentY + 5, { bold: true } as any);
+        doc.text('Finding / Risk Status', 200, currentY + 5, { bold: true } as any);
         doc.text('Explorer Link', 420, currentY + 5, { bold: true } as any);
         currentY += 20;
 

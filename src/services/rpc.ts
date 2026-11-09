@@ -35,12 +35,15 @@ export const rpcClient = createPublicClient({
 export const MAX_BLOCK_CHUNK = 900; // Pharos node limit is 1,000 blocks per eth_getLogs
 
 /**
- * Fetch logs across a block range, chunking requests to respect node limits
+ * Fetch logs across a block range, chunking requests to respect node limits.
+ * Uses direct JSON-RPC eth_getLogs serialization to guarantee topics and address
+ * filters are transmitted to the RPC node rather than omitted by Viem's getLogs wrapper.
  */
 export async function fetchLogsInChunks(
   fromBlock: bigint,
   toBlock: bigint,
-  topics: (string | string[] | null)[]
+  topics: (string | string[] | null)[],
+  addressFilter?: string
 ): Promise<Log[]> {
   const allLogs: Log[] = [];
   let currentFrom = fromBlock;
@@ -50,36 +53,42 @@ export async function fetchLogsInChunks(
       ? currentFrom + BigInt(MAX_BLOCK_CHUNK) - 1n 
       : toBlock;
 
+    const paramsObj: Record<string, any> = {
+      fromBlock: `0x${currentFrom.toString(16)}`,
+      toBlock: `0x${currentTo.toString(16)}`,
+      topics,
+    };
+    if (addressFilter) {
+      paramsObj.address = addressFilter;
+    }
+
     try {
-      const logs = await rpcClient.getLogs({
-        fromBlock: currentFrom,
-        toBlock: currentTo,
-        // @ts-ignore
-        topics,
-      });
-      allLogs.push(...logs);
+      const rawLogs = await rpcClient.request({
+        method: 'eth_getLogs',
+        params: [paramsObj],
+      }) as any[];
+
+      for (const r of rawLogs) {
+        allLogs.push({
+          address: r.address.toLowerCase() as `0x${string}`,
+          blockHash: r.blockHash,
+          blockNumber: typeof r.blockNumber === 'string' ? BigInt(r.blockNumber) : BigInt(r.blockNumber || 0),
+          data: r.data,
+          logIndex: typeof r.logIndex === 'string' ? parseInt(r.logIndex, 16) : Number(r.logIndex || 0),
+          removed: Boolean(r.removed),
+          topics: (r.topics || []) as `0x${string}`[],
+          transactionHash: r.transactionHash as `0x${string}`,
+          transactionIndex: typeof r.transactionIndex === 'string' ? parseInt(r.transactionIndex, 16) : Number(r.transactionIndex || 0),
+        } as Log);
+      }
     } catch (err: any) {
       console.warn(`[RPC] Chunk [${currentFrom}..${currentTo}] fetch warning:`, err?.message || err);
-      // If chunk is still too large, subdivide by half
+      // If chunk is rejected due to size, recursively subdivide
       if (currentTo > currentFrom) {
         const mid = currentFrom + (currentTo - currentFrom) / 2n;
-        try {
-          const sub1 = await rpcClient.getLogs({
-            fromBlock: currentFrom,
-            toBlock: mid,
-            // @ts-ignore
-            topics,
-          });
-          const sub2 = await rpcClient.getLogs({
-            fromBlock: mid + 1n,
-            toBlock: currentTo,
-            // @ts-ignore
-            topics,
-          });
-          allLogs.push(...sub1, ...sub2);
-        } catch (innerErr) {
-          console.error(`[RPC] Subdivided chunk failed:`, innerErr);
-        }
+        const sub1 = await fetchLogsInChunks(currentFrom, mid, topics, addressFilter);
+        const sub2 = await fetchLogsInChunks(mid + 1n, currentTo, topics, addressFilter);
+        allLogs.push(...sub1, ...sub2);
       }
     }
 

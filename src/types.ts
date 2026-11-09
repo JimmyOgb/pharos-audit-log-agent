@@ -5,6 +5,12 @@ export type ActivityCategory =
   | 'token_approvals' 
   | 'contract_interactions';
 
+export type AllowanceStatus = 
+  | 'Historical unlimited approval observed'
+  | 'Current unlimited allowance verified'
+  | 'Current allowance reduced or revoked'
+  | 'Current allowance unavailable or unverified';
+
 export interface ActivityItem {
   id: string;
   txHash: string;
@@ -21,6 +27,9 @@ export interface ActivityItem {
   tokenSymbol?: string;
   rawAmount?: string;
   formattedAmount?: string;
+  allowanceStatus?: AllowanceStatus;
+  currentAllowanceRaw?: string;
+  isSwapComponent?: boolean;
   isNotable: boolean;
   notableReason?: string;
   explorerUrl: string;
@@ -51,6 +60,9 @@ export interface CategoryTotals {
   token_approvals: {
     count: number;
     unlimitedApprovals: number;
+    currentVerifiedUnlimited: number;
+    currentReducedOrRevoked: number;
+    currentUnavailable: number;
     uniqueSpenders: number;
   };
   contract_interactions: {
@@ -77,6 +89,7 @@ export interface AuditReport {
   network: NetworkConfig;
   summary: {
     totalTransactions: number;
+    totalEvents: number;
     totalCategoriesRepresented: number;
     executiveSummary: string;
   };
@@ -87,6 +100,8 @@ export interface AuditReport {
   provenance: {
     queryTimestamp: string;
     blockSpan: number;
+    rawLogsRetrieved: number;
+    deduplicatedEventsCount: number;
     verifiedOnChain: boolean;
   };
 }

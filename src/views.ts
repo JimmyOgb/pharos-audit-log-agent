@@ -555,7 +555,7 @@ export function renderDashboardHtml(): string {
             <div class="cat-card">
               <div class="cat-name">Token Approvals</div>
               <div class="cat-count">\${catMap['token_approvals'] ? catMap['token_approvals'].count : 0}</div>
-              <div class="cat-detail">\${r.categoryTotals.token_approvals.unlimitedApprovals} unlimited allowances</div>
+              <div class="cat-detail">\${r.categoryTotals.token_approvals.currentVerifiedUnlimited} active unlimited (\${r.categoryTotals.token_approvals.currentReducedOrRevoked} revoked/reduced)</div>
             </div>
             <div class="cat-card">
               <div class="cat-name">Contract Calls</div>
