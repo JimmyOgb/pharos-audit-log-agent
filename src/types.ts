@@ -195,6 +195,10 @@ export interface AuditReport {
   notableTransactions: ActivityItem[];
   allActivities: ActivityItem[];
   provenance: {
+    sourceService?: string;
+    mcpEndpoint?: string;
+    mcpToolsUsed?: string[];
+    mcpDiagnostics?: any[];
     queryTimestamp: string;
     blockSpan: number;
     rawLogsRetrieved: number;

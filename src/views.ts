@@ -443,6 +443,7 @@ export function renderDashboardHtml(): string {
     let currentContinuationState = null;
     let isAutoScanning = false;
     let pauseRequested = false;
+    let activeScanRequestId = 0;
 
     function getStorageKey(addr) {
       return STORAGE_PREFIX + (addr || '').trim().toLowerCase();
@@ -469,6 +470,8 @@ export function renderDashboardHtml(): string {
     });
 
     function handleAddressChange() {
+      // Invalidate any active background fetch immediately
+      activeScanRequestId++;
       const inputAddr = document.getElementById('addressInput').value.trim();
       if (!inputAddr) {
         currentReport = null;
@@ -550,12 +553,14 @@ export function renderDashboardHtml(): string {
       const startDate = document.getElementById('startDate').value;
       const endDate = document.getElementById('endDate').value;
 
+      const thisReqId = ++activeScanRequestId;
+
       const btnSubmit = document.getElementById('btnSubmit');
       const btnText = document.getElementById('btnText');
       const btnSpinner = document.getElementById('btnSpinner');
 
       btnSubmit.disabled = true;
-      btnText.innerText = 'Scanning Chain...';
+      btnText.innerText = 'Retrieving from Official Pharos MCP...';
       btnSpinner.style.display = 'inline-block';
 
       try {
@@ -564,6 +569,8 @@ export function renderDashboardHtml(): string {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address, startDate, endDate })
         });
+
+        if (thisReqId !== activeScanRequestId) return; // Discard stale response
 
         const data = await resp.json();
         if (!data.success) {
@@ -575,11 +582,14 @@ export function renderDashboardHtml(): string {
         currentContinuationState = data.report.continuationState || null;
         renderReport(currentReport);
       } catch (err) {
-        alert('Network error connecting to Pharos node: ' + err.message);
+        if (thisReqId !== activeScanRequestId) return;
+        alert('Network error connecting to Pharos MCP / RPC node: ' + err.message);
       } finally {
-        btnSubmit.disabled = false;
-        btnText.innerText = 'Generate Audit';
-        btnSpinner.style.display = 'none';
+        if (thisReqId === activeScanRequestId) {
+          btnSubmit.disabled = false;
+          btnText.innerText = 'Generate Audit';
+          btnSpinner.style.display = 'none';
+        }
       }
     }
 
@@ -640,32 +650,40 @@ export function renderDashboardHtml(): string {
 
       let notableRows = '';
       if (r.notableTransactions.length === 0) {
-        notableRows = '<tr><td colspan="6" style="text-align: center; color: #9ca3af;">No notable high-value transactions, contract failures, or infinite allowance risks identified.</td></tr>';
+        notableRows = '<tr><td colspan="5" style="text-align: center; color: #9ca3af;">No notable high-value transactions, contract failures, or infinite allowance risks identified.</td></tr>';
       } else {
-        notableRows = r.notableTransactions.map(t => \`
+        notableRows = r.notableTransactions.map(t => {
+          let valDisplay = '-';
+          if (t.category === 'token_approvals' && (t.isUnlimited || (t.details && t.details.includes('Infinite')))) {
+            valDisplay = 'Unlimited ' + (t.tokenSymbol || 'ERC-20');
+          } else if (t.formattedAmount) {
+            valDisplay = t.formattedAmount + ' ' + (t.tokenSymbol || '');
+          }
+          return \`
           <tr>
             <td>\${t.dateFormatted}</td>
             <td><span class="badge badge-\${t.category}">\${t.categoryLabel}</span></td>
-            <td><span style="font-size: 0.75rem; background: #1e293b; padding: 0.2rem 0.4rem; border-radius: 4px;">\${t.assetType || 'ERC20'}</span></td>
-            <td><strong>\${t.title}</strong><br><span style="font-size: 0.75rem; color: #ef4444;">\${t.notableReason || ''}</span></td>
-            <td style="font-family: 'JetBrains Mono', monospace;">\${t.formattedAmount ? t.formattedAmount + ' ' + (t.tokenSymbol || '') : '-'}</td>
+            <td><strong>\${t.title}</strong><br><span style="font-size: 0.75rem; color: #ef4444;">\${t.notableReason || t.details || ''}</span></td>
+            <td style="font-family: 'JetBrains Mono', monospace;">\${valDisplay}</td>
             <td><a href="\${t.explorerUrl}" target="_blank" rel="noopener" class="link-explorer">\${t.txHash.slice(0, 8)}...\${t.txHash.slice(-6)} ↗</a></td>
           </tr>
-        \`).join('');
+        \`;
+        }).join('');
       }
 
       let allRows = '';
       if (r.allActivities.length === 0) {
-        allRows = \`<tr><td colspan="7" style="text-align: center; color: #9ca3af;">Zero activities detected in cumulatively scanned window (\${totalScanned ? totalScanned.toLocaleString() : 0} blocks; \${r.startDate} to \${r.endDate}).</td></tr>\`;
+        allRows = \`<tr><td colspan="8" style="text-align: center; color: #9ca3af;">Zero activities detected in cumulatively scanned window (\${totalScanned ? totalScanned.toLocaleString() : 0} blocks; \${r.startDate} to \${r.endDate}).</td></tr>\`;
       } else {
         allRows = r.allActivities.slice(0, 100).map(t => \`
           <tr>
             <td style="font-family: 'JetBrains Mono', monospace;">\${t.blockNumber}</td>
+            <td>\${t.dateFormatted}</td>
             <td><span class="badge badge-\${t.category}">\${t.categoryLabel}</span></td>
-            <td><span style="font-size: 0.75rem; background: #1e293b; padding: 0.2rem 0.4rem; border-radius: 4px;">\${t.assetType || 'ERC20'}</span></td>
+            <td><span style="font-size: 0.75rem; background: #1e293b; padding: 0.2rem 0.4rem; border-radius: 4px;">\${t.assetType || (t.tokenSymbol ? 'ERC20' : 'PHAROS')}</span></td>
             <td>\${t.title}</td>
             <td style="font-family: 'JetBrains Mono', monospace;">\${t.formattedAmount ? t.formattedAmount + ' ' + (t.tokenSymbol || '') : '-'}</td>
-            <td><span style="font-size: 0.75rem; color: \${t.status === 'REVERTED' ? '#ef4444' : '#10b981'};">\${t.status || 'SUCCESS'}</span></td>
+            <td><span style="font-size: 0.75rem; color: \${t.status === 'REVERTED' ? '#ef4444' : '#10b981'}; font-weight: 600;">\${t.status || 'SUCCESS'}</span></td>
             <td><a href="\${t.explorerUrl}" target="_blank" rel="noopener" class="link-explorer">\${t.txHash.slice(0, 8)}...\${t.txHash.slice(-6)} ↗</a></td>
           </tr>
         \`).join('');
@@ -723,27 +741,27 @@ export function renderDashboardHtml(): string {
 
           <div class="categories-grid">
             <div class="cat-card">
-              <div class="cat-name">Transfers In</div>
+              <div class="cat-name">TRANSFERS IN</div>
               <div class="cat-count">\${catMap['transfers_in'] ? catMap['transfers_in'].count : 0}</div>
-              <div class="cat-detail">\${r.categoryTotals.transfers_in.nativeCount} Native (\${r.categoryTotals.transfers_in.nativeAmountFormatted}) • \${r.categoryTotals.transfers_in.erc20Count} ERC-20</div>
+              <div class="cat-detail">\${r.categoryTotals.transfers_in.uniqueSenders || 0} unique senders</div>
             </div>
             <div class="cat-card">
-              <div class="cat-name">Transfers Out</div>
+              <div class="cat-name">TRANSFERS OUT</div>
               <div class="cat-count">\${catMap['transfers_out'] ? catMap['transfers_out'].count : 0}</div>
-              <div class="cat-detail">\${r.categoryTotals.transfers_out.nativeCount} Native (\${r.categoryTotals.transfers_out.nativeAmountFormatted}) • \${r.categoryTotals.transfers_out.erc20Count} ERC-20</div>
+              <div class="cat-detail">\${r.categoryTotals.transfers_out.uniqueRecipients || 0} unique recipients</div>
             </div>
             <div class="cat-card">
-              <div class="cat-name">Swaps</div>
+              <div class="cat-name">SWAPS</div>
               <div class="cat-count">\${catMap['swaps'] ? catMap['swaps'].count : 0}</div>
               <div class="cat-detail">Uniswap / AMM Liquidity</div>
             </div>
             <div class="cat-card">
-              <div class="cat-name">Token Approvals</div>
+              <div class="cat-name">TOKEN APPROVALS</div>
               <div class="cat-count">\${catMap['token_approvals'] ? catMap['token_approvals'].count : 0}</div>
-              <div class="cat-detail">\${r.categoryTotals.token_approvals.currentVerifiedUnlimited} active unlimited (\${r.categoryTotals.token_approvals.currentReducedOrRevoked} revoked/reduced)</div>
+              <div class="cat-detail">\${r.categoryTotals.token_approvals.unlimitedApprovals || r.categoryTotals.token_approvals.currentVerifiedUnlimited || 0} unlimited allowances</div>
             </div>
             <div class="cat-card">
-              <div class="cat-name">Contract Calls</div>
+              <div class="cat-name">CONTRACT CALLS</div>
               <div class="cat-count">\${catMap['contract_interactions'] ? catMap['contract_interactions'].count : 0}</div>
               <div class="cat-detail">Smart Contract Invocation</div>
             </div>
@@ -756,7 +774,6 @@ export function renderDashboardHtml(): string {
                 <tr>
                   <th>Timestamp</th>
                   <th>Category</th>
-                  <th>Asset</th>
                   <th>Finding / Details</th>
                   <th>Value</th>
                   <th>PharosScan</th>
@@ -774,6 +791,7 @@ export function renderDashboardHtml(): string {
               <thead>
                 <tr>
                   <th>Block</th>
+                  <th>Timestamp</th>
                   <th>Category</th>
                   <th>Asset</th>
                   <th>Action Summary</th>

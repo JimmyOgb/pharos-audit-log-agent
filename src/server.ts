@@ -5,6 +5,7 @@ import { generateAuditReport } from './services/reportGenerator.js';
 import { exportToMarkdown, exportToCSV, exportToPDF } from './services/exporters.js';
 import { renderDashboardHtml } from './views.js';
 import { validateAndNormalizeAddress } from './services/addressValidator.js';
+import { getMcpSessionState, getMcpDiagnostics } from './services/mcpAdapter.js';
 import type { AuditReport } from './types.js';
 
 dotenv.config();
@@ -36,6 +37,20 @@ app.get('/api/health', (_req: Request, res: Response) => {
     chainId: Number(process.env.PHAROS_CHAIN_ID || 688689),
     rpcUrl: process.env.PHAROS_RPC_URL || 'https://atlantic.dplabs-internal.com',
     explorer: process.env.PHAROS_EXPLORER_URL || 'https://atlantic.pharosscan.com',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Official Pharos MCP Status & Diagnostic Telemetry
+app.get('/api/mcp/status', (_req: Request, res: Response) => {
+  const session = getMcpSessionState();
+  const diagnostics = getMcpDiagnostics();
+  res.json({
+    status: 'ok',
+    mcpEndpoint: process.env.MCP_ENDPOINT || process.env.PHAROS_MCP_ENDPOINT || 'https://mcp.pharos.xyz/mcp',
+    session,
+    diagnosticsCount: diagnostics.length,
+    recentDiagnostics: diagnostics.slice(-10),
     timestamp: new Date().toISOString(),
   });
 });

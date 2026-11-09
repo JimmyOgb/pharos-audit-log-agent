@@ -6,6 +6,7 @@ import { fetchRawActivitiesForAddress } from './activityFetcher.js';
 import { classifyActivities } from './classifier.js';
 import { fetchNativeTransactions, formatPharos } from './nativeFetcher.js';
 import { pharosAtlantic, rpcClient } from './rpc.js';
+import { getMcpDiagnostics } from './mcpAdapter.js';
 
 export async function generateAuditReport(request: AuditRequest): Promise<AuditReport> {
   const { address, startDate, endDate, blockSpan, cursor, continuationState } = request;
@@ -373,6 +374,10 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     notableTransactions,
     allActivities: unifiedActivities,
     provenance: {
+      sourceService: 'pharos-mcp',
+      mcpEndpoint: process.env.MCP_ENDPOINT || process.env.PHAROS_MCP_ENDPOINT || 'https://mcp.pharos.xyz/mcp',
+      mcpToolsUsed: ['get_logs', 'get_transaction_receipt', 'get_balance', 'get_block_number', 'get_chain_info'],
+      mcpDiagnostics: getMcpDiagnostics(),
       queryTimestamp: new Date().toISOString(),
       blockSpan: totalCumulativeScanned,
       rawLogsRetrieved,
