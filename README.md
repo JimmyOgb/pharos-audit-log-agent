@@ -2,7 +2,9 @@
 
 > Production-ready on-chain compliance activity auditor and report generator for the Pharos Atlantic Testnet.
 
-The **Pharos Audit-Log Agent** inspects genuine historical on-chain activity for any EVM wallet over a user-selected date range and generates human-readable, verifiable activity reports designed for compliance officers, accountants, auditors, and wallet owners.
+**Live Application:** [https://pharos-audit-log-agent-two.vercel.app](https://pharos-audit-log-agent-two.vercel.app)  
+**GitHub Repository:** [https://github.com/JimmyOgb/pharos-audit-log-agent](https://github.com/JimmyOgb/pharos-audit-log-agent)  
+**Network:** Pharos Atlantic Testnet (Chain ID: `688689`)
 
 ---
 
