@@ -384,11 +384,11 @@ export function renderDashboardHtml(): string {
             <input 
               type="text" 
               id="addressInput" 
-              placeholder="0x..." 
+              placeholder="0x... (Enter any valid EVM wallet address)" 
               required 
-              value="0xE4220c4b71877bb94EB173f467ef5c5557017085"
               autocomplete="off"
               spellcheck="false"
+              oninput="handleAddressChange()"
             />
           </div>
           <div class="form-group">
@@ -409,9 +409,11 @@ export function renderDashboardHtml(): string {
 
         <div class="quick-addresses">
           <span style="font-size: 0.8rem; color: #64748b;">Sample Wallets:</span>
-          <button type="button" class="quick-btn" onclick="setWallet('0xE4220c4b71877bb94EB173f467ef5c5557017085')">0xE422...7085 (Target Wallet)</button>
-          <button type="button" class="quick-btn" onclick="setWallet('0x89b97db15f0bc3b12c8a2e4ae8549788c0823838')">0x89b9...3838 (Positive ERC-20)</button>
-          <button type="button" class="quick-btn" onclick="setWallet('0x000000000000000000000000000000000000dead')">0x0000...dead (Idle/Burn)</button>
+          <button type="button" class="quick-btn" onclick="setWallet('0xE4220c4b71877bb94EB173f467ef5c5557017085')">0xE422...7085 (Target: Swaps & Outbound)</button>
+          <button type="button" class="quick-btn" onclick="setWallet('0x70997970c51812dc3a010c7d01b50e0d17dc79c8')">0x7099...dc79 (Counterparty: Inbound Native)</button>
+          <button type="button" class="quick-btn" onclick="setWallet('0x89b97db15f0bc3b12c8a2e4ae8549788c0823838')">0x89b9...3838 (Active Token User)</button>
+          <button type="button" class="quick-btn" onclick="setWallet('0x196fc6aab375e4999dd5f23522bc8ece986b1493')">0x196f...1493 (Faucet/Funding)</button>
+          <button type="button" class="quick-btn" onclick="setWallet('0x000000000000000000000000000000000000dead')">0x0000...dead (Zero-Activity Safeguard)</button>
           <span style="font-size: 0.8rem; color: #64748b; margin-left: 0.5rem;">Date Presets:</span>
           <button type="button" class="quick-btn" onclick="setDateRange('2026-10-15', '2026-11-09')">Active Window (Oct–Nov 2026)</button>
           <button type="button" class="quick-btn" onclick="setDateRange('2025-09-28', '2026-11-09')">Genesis Full Range</button>
@@ -421,7 +423,7 @@ export function renderDashboardHtml(): string {
     </div>
 
     <div id="restoredNotice" style="display: none; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.85rem; color: #93c5fd; display: flex; justify-content: space-between; align-items: center;">
-      <span>📂 Restored active audit session from local storage.</span>
+      <span id="restoredNoticeText">📂 Restored active audit session from local storage.</span>
       <button type="button" onclick="clearSavedSession()" style="background: none; border: 1px solid #3b82f6; color: #93c5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer;">Clear Session</button>
     </div>
 
@@ -435,11 +437,16 @@ export function renderDashboardHtml(): string {
   </footer>
 
   <script>
-    const STORAGE_KEY = 'pharos_audit_report_session';
+    const STORAGE_PREFIX = 'pharos_audit_session_';
+    const LAST_WALLET_KEY = 'pharos_audit_last_wallet';
     let currentReport = null;
     let currentContinuationState = null;
     let isAutoScanning = false;
     let pauseRequested = false;
+
+    function getStorageKey(addr) {
+      return STORAGE_PREFIX + (addr || '').trim().toLowerCase();
+    }
 
     window.addEventListener('DOMContentLoaded', () => {
       const today = new Date();
@@ -449,33 +456,72 @@ export function renderDashboardHtml(): string {
       document.getElementById('endDate').value = today.toISOString().slice(0, 10);
       document.getElementById('startDate').value = past7.toISOString().slice(0, 10);
 
-      // Restore saved session from localStorage if available
+      // Check if there was a last active wallet
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const lastWallet = localStorage.getItem(LAST_WALLET_KEY);
+        if (lastWallet) {
+          document.getElementById('addressInput').value = lastWallet;
+          restoreWalletSession(lastWallet);
+        }
+      } catch (err) {
+        console.warn('Could not restore last wallet:', err);
+      }
+    });
+
+    function handleAddressChange() {
+      const inputAddr = document.getElementById('addressInput').value.trim();
+      if (!inputAddr) {
+        currentReport = null;
+        currentContinuationState = null;
+        document.getElementById('resultsContainer').style.display = 'none';
+        document.getElementById('restoredNotice').style.display = 'none';
+        document.getElementById('btnClearSession').style.display = 'none';
+        return;
+      }
+
+      // If user typed a different address than current report, isolate immediately
+      if (!currentReport || currentReport.walletAddress.toLowerCase() !== inputAddr.toLowerCase()) {
+        currentContinuationState = null;
+        restoreWalletSession(inputAddr);
+      }
+    }
+
+    function restoreWalletSession(addr) {
+      try {
+        const saved = localStorage.getItem(getStorageKey(addr));
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (parsed && parsed.walletAddress && parsed.coverage) {
+          if (parsed && parsed.walletAddress && parsed.walletAddress.toLowerCase() === addr.toLowerCase() && parsed.coverage) {
             currentReport = parsed;
             currentContinuationState = parsed.continuationState || null;
-            document.getElementById('addressInput').value = parsed.walletAddress;
             if (parsed.coverage.requestedStartDate) {
               document.getElementById('startDate').value = parsed.coverage.requestedStartDate.slice(0, 10);
             }
             if (parsed.coverage.requestedEndDate) {
               document.getElementById('endDate').value = parsed.coverage.requestedEndDate.slice(0, 10);
             }
+            document.getElementById('restoredNoticeText').innerText = '📂 Restored active session for ' + parsed.walletAddress;
             document.getElementById('restoredNotice').style.display = 'flex';
             document.getElementById('btnClearSession').style.display = 'inline-block';
-            renderReport(parsed);
+            renderReport(parsed, false);
+            return;
           }
         }
       } catch (err) {
-        console.warn('Could not restore saved session:', err);
+        console.warn('Could not restore wallet session:', err);
       }
-    });
+
+      // If no saved session for this address, isolate UI by hiding previous results
+      currentReport = null;
+      currentContinuationState = null;
+      document.getElementById('resultsContainer').style.display = 'none';
+      document.getElementById('restoredNotice').style.display = 'none';
+      document.getElementById('btnClearSession').style.display = 'none';
+    }
 
     function setWallet(addr) {
       document.getElementById('addressInput').value = addr;
+      handleAddressChange();
     }
 
     function setDateRange(start, end) {
@@ -484,9 +530,13 @@ export function renderDashboardHtml(): string {
     }
 
     function clearSavedSession() {
-      try {
-        localStorage.removeItem(STORAGE_KEY);
-      } catch {}
+      const inputAddr = document.getElementById('addressInput').value.trim();
+      if (inputAddr) {
+        try {
+          localStorage.removeItem(getStorageKey(inputAddr));
+          localStorage.removeItem(LAST_WALLET_KEY);
+        } catch {}
+      }
       currentReport = null;
       currentContinuationState = null;
       document.getElementById('resultsContainer').style.display = 'none';
@@ -537,9 +587,10 @@ export function renderDashboardHtml(): string {
       const container = document.getElementById('resultsContainer');
       container.style.display = 'block';
 
-      // Persist report in localStorage
+      // Persist report in localStorage strictly isolated by wallet address
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(r));
+        localStorage.setItem(getStorageKey(r.walletAddress), JSON.stringify(r));
+        localStorage.setItem(LAST_WALLET_KEY, r.walletAddress);
         document.getElementById('btnClearSession').style.display = 'inline-block';
       } catch (e) {
         console.warn('Could not save session to localStorage:', e);
@@ -750,6 +801,12 @@ export function renderDashboardHtml(): string {
         return false;
       }
 
+      const inputAddr = document.getElementById('addressInput').value.trim();
+      if (inputAddr && inputAddr.toLowerCase() !== currentReport.walletAddress.toLowerCase()) {
+        alert('The wallet address in the input field (' + inputAddr + ') does not match the active scan session (' + currentReport.walletAddress + '). Please click "Generate Audit" to initiate an independent scan.');
+        return false;
+      }
+
       const btnSubmit = document.getElementById('btnSubmit');
       const btnText = document.getElementById('btnText');
       const btnSpinner = document.getElementById('btnSpinner');
@@ -854,7 +911,11 @@ export function renderDashboardHtml(): string {
         return;
       }
       try {
-        const resp = await fetch('/api/export/' + format, {
+        const queryParams = new URLSearchParams({
+          address: currentReport.walletAddress,
+          id: currentReport.reportId
+        });
+        const resp = await fetch('/api/export/' + format + '?' + queryParams.toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ report: currentReport })

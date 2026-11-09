@@ -1,4 +1,5 @@
 import { rpcClient } from './rpc.js';
+import { validateAndNormalizeAddress } from './addressValidator.js';
 import type { ScanCoverage, ScanCompleteness, ContinuationState } from '../types.js';
 
 export const PHAROS_GENESIS_BLOCK = 1n;
@@ -102,10 +103,21 @@ export async function resolveBlockRange(
   if (continuationState && typeof continuationState === 'object') {
     // Validate target address binding to prevent session tampering
     if (targetAddress && continuationState.originalTargetAddress) {
-      if (targetAddress.toLowerCase() !== continuationState.originalTargetAddress.toLowerCase()) {
-        throw new Error(
-          `Continuation state address mismatch: cursor was created for ${continuationState.originalTargetAddress}, but request targeted ${targetAddress}`
-        );
+      try {
+        const normTarget = validateAndNormalizeAddress(targetAddress);
+        const normOriginal = validateAndNormalizeAddress(continuationState.originalTargetAddress);
+        if (normTarget !== normOriginal) {
+          throw new Error(
+            `Continuation state address mismatch: cursor was created for ${normOriginal}, but request targeted ${normTarget}`
+          );
+        }
+      } catch (err: any) {
+        if (err.message.includes('Continuation state address mismatch')) throw err;
+        if (targetAddress.toLowerCase() !== continuationState.originalTargetAddress.toLowerCase()) {
+          throw new Error(
+            `Continuation state address mismatch: cursor was created for ${continuationState.originalTargetAddress}, but request targeted ${targetAddress}`
+          );
+        }
       }
     }
 

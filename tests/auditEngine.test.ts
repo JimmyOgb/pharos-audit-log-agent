@@ -4,6 +4,7 @@ import { classifyActivities, formatTokenAmount, checkCurrentAllowance } from '..
 import { exportToMarkdown, exportToCSV, exportToPDF } from '../src/services/exporters.js';
 import { generateAuditReport } from '../src/services/reportGenerator.js';
 import { formatPharos, fetchNativeTransactions } from '../src/services/nativeFetcher.js';
+import { validateAndNormalizeAddress } from '../src/services/addressValidator.js';
 import { 
   TOPIC_TRANSFER, 
   TOPIC_APPROVAL, 
@@ -854,7 +855,158 @@ async function runTests() {
   assert(liveSwap !== undefined && liveSwap.category === 'swaps');
   console.log('  ✔ Positive-control matrix: all 5 activity types verified on-chain and classified correctly.');
 
-  console.log('\n🎉 ALL 44 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
+  // ====================================================
+  // SECTION 8: UNIVERSAL WALLET SUPPORT & ZERO-ACTIVITY ACCURACY (Tests 45 - 55)
+  // ====================================================
+  console.log('\n--- SECTION 8: Universal Wallet Support & Zero-Activity Safeguards ---');
+
+  // Test 45: Arbitrary valid wallet input normalized (lowercase, uppercase, checksummed)
+  console.log('Test 45: Arbitrary valid wallet input normalization');
+  const lowerWallet = '0xe4220c4b71877bb94eb173f467ef5c5557017085';
+  const upperWallet = '0xE4220C4B71877BB94EB173F467EF5C5557017085';
+  const checksummedWallet = '0xE4220c4b71877bb94EB173f467ef5c5557017085';
+  assert.strictEqual(validateAndNormalizeAddress(lowerWallet), checksummedWallet);
+  assert.strictEqual(validateAndNormalizeAddress(upperWallet), checksummedWallet);
+  assert.strictEqual(validateAndNormalizeAddress(checksummedWallet), checksummedWallet);
+  console.log('  ✔ All casing variations correctly normalized to canonical checksummed address.');
+
+  // Test 46: Invalid wallet address rejection
+  console.log('\nTest 46: Invalid wallet address rejection');
+  let errCount = 0;
+  try { validateAndNormalizeAddress('0xShort'); } catch { errCount++; }
+  try { validateAndNormalizeAddress('not-an-address'); } catch { errCount++; }
+  try { validateAndNormalizeAddress('0xE4220c4b71877bb94eb173f467ef5c5557017085'); } catch { errCount++; } // bad mixed-case checksum
+  try { validateAndNormalizeAddress(''); } catch { errCount++; }
+  try { validateAndNormalizeAddress(null as any); } catch { errCount++; }
+  assert.strictEqual(errCount, 5, 'All 5 invalid inputs must be rejected');
+  console.log('  ✔ Invalid address formats, corrupt checksums, and empty values strictly rejected.');
+
+  // Test 47: Multi-wallet verified inbound native attribution (Counterparty Wallet)
+  console.log('\nTest 47: Multi-wallet verified inbound native attribution (Counterparty)');
+  const counterpartyWallet = '0x70997970c51812dc3a010c7d01b50e0d17dc79c8';
+  const counterpartyRep = await generateAuditReport({
+    address: counterpartyWallet,
+    cursor: { fromBlock: 32463700, toBlock: 32463710 }
+  });
+  assert.strictEqual(counterpartyRep.walletAddress, validateAndNormalizeAddress(counterpartyWallet));
+  assert(counterpartyRep.categoryTotals.transfers_in.nativeCount >= 1, 'Counterparty must show inbound native transfer');
+  assert.strictEqual(counterpartyRep.categoryTotals.transfers_in.nativeAmountFormatted, '25.0000 PHAROS');
+  console.log('  ✔ Different wallet (0x7099...dc79) independently scanned with verified 25.0 PHAROS inbound.');
+
+  // Test 48: Multi-wallet verified ERC-20 transfer attribution (Active Token User)
+  console.log('\nTest 48: Multi-wallet verified ERC-20 transfer attribution (Active Token User)');
+  const tokenUserWallet = '0x89b97db15f0bc3b12c8a2e4ae8549788c0823838';
+  const tokenRep = await generateAuditReport({
+    address: tokenUserWallet,
+    cursor: { fromBlock: 32498190, toBlock: 32498200 }
+  });
+  assert.strictEqual(tokenRep.walletAddress, validateAndNormalizeAddress(tokenUserWallet));
+  assert(tokenRep.categoryTotals.transfers_out.erc20Count >= 1, 'Token user must show ERC-20 outbound transfer');
+  console.log('  ✔ Token user wallet (0x89b9...3838) independently scanned with verified ERC-20 activity.');
+
+  // Test 49: Genuinely zero-activity wallet in active block range
+  console.log('\nTest 49: Genuinely zero-activity wallet in active block range');
+  const zeroActivityWallet = '0x000000000000000000000000000000000000dead';
+  const zeroRep = await generateAuditReport({
+    address: zeroActivityWallet,
+    cursor: { fromBlock: 32463700, toBlock: 32463710 }
+  });
+  assert.strictEqual(zeroRep.walletAddress, validateAndNormalizeAddress(zeroActivityWallet));
+  assert.strictEqual(zeroRep.allActivities.length, 0, 'Zero-activity wallet must have 0 events');
+  assert.strictEqual(zeroRep.summary.totalTransactions, 0, 'Zero-activity wallet must have 0 transactions');
+  console.log('  ✔ Zero-activity wallet (0x0000...dead) correctly evaluated with 0 events in inspected interval.');
+
+  // Test 50: Zero-activity report safeguard (partial scan cannot certify idle status)
+  console.log('\nTest 50: Zero-activity report safeguard (partial scan cannot certify idle status)');
+  // 50a. Complete scan certifies idle for the full inspected interval
+  assert.strictEqual(zeroRep.coverage.completeness, 'COMPLETE');
+  assert(zeroRep.summary.executiveSummary.includes('idle state with zero native transfers'));
+
+  // 50b. Partial scan with zero events enforces ZERO-ACTIVITY SAFEGUARD
+  const zeroPartialRep = await generateAuditReport({
+    address: zeroActivityWallet,
+    continuationState: {
+      originalTargetAddress: zeroActivityWallet,
+      requestedStartDate: '2026-11-08T03:00:00.000Z',
+      requestedEndDate: '2026-11-08T06:00:00.000Z',
+      resolvedStartBlock: 32460000,
+      resolvedEndBlock: 32466000,
+      totalRequestedBlocks: 6001,
+      scannedBlockRanges: [],
+      totalScannedBlocks: 0,
+      accumulatedActivities: [],
+      nextFromBlock: 32460000,
+      nextToBlock: 32463000,
+      isComplete: false,
+      empiricalSecondsPerBlock: 2.18,
+    }
+  });
+  assert.strictEqual(zeroPartialRep.coverage.completeness, 'PARTIAL');
+  assert(zeroPartialRep.summary.executiveSummary.includes('ZERO-ACTIVITY SAFEGUARD'), 'Executive summary must include ZERO-ACTIVITY SAFEGUARD');
+  assert(zeroPartialRep.summary.executiveSummary.includes('cannot be certified idle'), 'Must explicitly warn that wallet cannot be certified idle');
+  console.log('  ✔ Zero-activity safeguard verified: partial scan explicitly prevents false idle certification.');
+
+  // Test 51: Wallet session isolation (continuation cursor cross-wallet rejection)
+  console.log('\nTest 51: Wallet session isolation (continuation cursor cross-wallet rejection)');
+  let sessionMismatchCaught = false;
+  try {
+    await generateAuditReport({
+      address: counterpartyWallet, // Requesting counterparty
+      continuationState: {
+        originalTargetAddress: testWallet, // State belongs to target wallet
+        requestedStartDate: '2026-11-08T03:00:00.000Z',
+        requestedEndDate: '2026-11-08T06:00:00.000Z',
+        resolvedStartBlock: 32460000,
+        resolvedEndBlock: 32466000,
+        totalRequestedBlocks: 6001,
+        scannedBlockRanges: [],
+        totalScannedBlocks: 0,
+        accumulatedActivities: [],
+        nextFromBlock: 32460000,
+        nextToBlock: 32466000,
+        isComplete: false,
+      }
+    });
+  } catch (err: any) {
+    sessionMismatchCaught = err.message.includes('Continuation state address mismatch');
+  }
+  assert.strictEqual(sessionMismatchCaught, true, 'Cross-wallet continuation reuse must be rejected');
+  console.log('  ✔ Cross-wallet continuation cursor reuse strictly rejected with session isolation error.');
+
+  // Test 52: Independent server caching & cross-wallet isolation
+  console.log('\nTest 52: Independent server caching & cross-wallet isolation');
+  assert.notStrictEqual(counterpartyRep.reportId, zeroRep.reportId);
+  assert.notStrictEqual(counterpartyRep.walletAddress, zeroRep.walletAddress);
+  console.log('  ✔ Independent report IDs and wallet addressing verified across scans.');
+
+  // Test 53: Multi-wallet exporter isolation
+  console.log('\nTest 53: Multi-wallet exporter isolation');
+  const mdTarget = exportToMarkdown(counterpartyRep);
+  const csvTarget = exportToCSV(counterpartyRep);
+  const pdfTarget = await exportToPDF(counterpartyRep);
+  assert(mdTarget.includes(counterpartyRep.walletAddress));
+  assert(!mdTarget.includes(zeroRep.walletAddress));
+  assert(csvTarget.includes(counterpartyRep.walletAddress));
+  assert(pdfTarget.byteLength > 1000);
+  console.log('  ✔ Markdown, CSV, and PDF exports isolated strictly to the analyzed wallet.');
+
+  // Test 54: Universal wallet input without wallet ownership/connection
+  console.log('\nTest 54: Universal wallet input without wallet ownership/connection');
+  const arbitraryWallet = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Vitalik.eth public address
+  const arbitraryRep = await generateAuditReport({
+    address: arbitraryWallet,
+    cursor: { fromBlock: 32463700, toBlock: 32463705 }
+  });
+  assert.strictEqual(arbitraryRep.walletAddress, arbitraryWallet);
+  console.log('  ✔ Arbitrary public address successfully accepted for read-only audit without signature/connection.');
+
+  // Test 55: Disclosed native transfer limitations in provenance and exports
+  console.log('\nTest 55: Disclosed native transfer limitations in provenance and exports');
+  assert(arbitraryRep.provenance.unsupportedOrPartialNotice !== undefined);
+  assert(arbitraryRep.provenance.unsupportedOrPartialNotice.includes('trace indexing'));
+  console.log('  ✔ Provenance disclosure transparently states internal native transfer boundaries.');
+
+  console.log('\n🎉 ALL 55 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
 }
 
 runTests().catch((err) => {

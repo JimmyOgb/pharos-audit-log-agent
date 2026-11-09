@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { generateAuditReport } from './services/reportGenerator.js';
 import { exportToMarkdown, exportToCSV, exportToPDF } from './services/exporters.js';
 import { renderDashboardHtml } from './views.js';
+import { validateAndNormalizeAddress } from './services/addressValidator.js';
 import type { AuditReport } from './types.js';
 
 dotenv.config();
@@ -14,9 +15,11 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// In-memory cache for recent reports
-let latestReportCache: AuditReport | null = null;
+// In-memory cache for reports, strictly isolated by wallet address and report ID
+// A report for wallet A is NEVER returned or shared with wallet B.
 const reportStore = new Map<string, AuditReport>();
+const latestReportByWallet = new Map<string, AuditReport>();
+const scanSessionStore = new Map<string, AuditReport>();
 
 // Web Dashboard
 app.get(['/', '/api'], (_req: Request, res: Response) => {
@@ -45,8 +48,27 @@ app.post('/api/report', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'Missing required field: "address"' });
     }
 
+    // Universal address validation and normalization
+    let cleanAddress: string;
+    try {
+      cleanAddress = validateAndNormalizeAddress(address);
+    } catch (valErr: any) {
+      return res.status(400).json({ success: false, error: valErr.message });
+    }
+
+    // If continuation state is provided, enforce strict address isolation
+    if (continuationState && typeof continuationState === 'object' && continuationState.originalTargetAddress) {
+      const origClean = validateAndNormalizeAddress(continuationState.originalTargetAddress);
+      if (origClean !== cleanAddress) {
+        return res.status(400).json({
+          success: false,
+          error: `Continuation session mismatch: continuation belongs to "${origClean}", but request targeted "${cleanAddress}". Wallet-specific scan sessions are strictly isolated.`
+        });
+      }
+    }
+
     const report = await generateAuditReport({
-      address: String(address).trim(),
+      address: cleanAddress,
       startDate: startDate ? String(startDate) : undefined,
       endDate: endDate ? String(endDate) : undefined,
       blockSpan: blockSpan ? Number(blockSpan) : undefined,
@@ -57,8 +79,13 @@ app.post('/api/report', async (req: Request, res: Response) => {
       } : undefined,
     });
 
-    latestReportCache = report;
+    // Store in isolated wallet caches
+    const walletKey = cleanAddress.toLowerCase();
+    latestReportByWallet.set(walletKey, report);
     reportStore.set(report.reportId, report);
+
+    const sessionKey = `${walletKey}:${report.network.chainId}:${report.startBlock}:${report.endBlock}`;
+    scanSessionStore.set(sessionKey, report);
 
     res.json({ success: true, report });
   } catch (err: any) {
@@ -67,21 +94,76 @@ app.post('/api/report', async (req: Request, res: Response) => {
   }
 });
 
-// Get Latest Report
-app.get('/api/report/latest', (_req: Request, res: Response) => {
-  if (!latestReportCache) {
-    return res.status(404).json({ success: false, error: 'No report has been generated yet.' });
+// Get Latest Report for a Specific Wallet
+app.get('/api/report/latest', (req: Request, res: Response) => {
+  const rawAddress = req.query.address as string;
+  if (!rawAddress) {
+    return res.status(400).json({
+      success: false,
+      error: 'Query parameter "address" is required to retrieve the latest wallet audit report. Cross-wallet cache sharing is strictly prohibited.'
+    });
   }
-  res.json({ success: true, report: latestReportCache });
+
+  let cleanAddress: string;
+  try {
+    cleanAddress = validateAndNormalizeAddress(rawAddress);
+  } catch (valErr: any) {
+    return res.status(400).json({ success: false, error: valErr.message });
+  }
+
+  const walletReport = latestReportByWallet.get(cleanAddress.toLowerCase());
+  if (!walletReport) {
+    return res.status(404).json({
+      success: false,
+      error: `No report has been generated yet for wallet "${cleanAddress}".`
+    });
+  }
+
+  res.json({ success: true, report: walletReport });
 });
+
+// Helper to resolve report for export without cross-wallet leakage
+function resolveExportReport(req: Request): AuditReport | null {
+  if (req.body?.report && typeof req.body.report === 'object') {
+    return req.body.report as AuditReport;
+  }
+
+  const reportId = (req.query.id as string) || (req.body?.id as string);
+  if (reportId && reportStore.has(reportId)) {
+    const r = reportStore.get(reportId)!;
+    const rawAddress = (req.query.address as string) || (req.body?.address as string);
+    if (rawAddress) {
+      try {
+        const clean = validateAndNormalizeAddress(rawAddress);
+        if (clean.toLowerCase() !== r.walletAddress.toLowerCase()) {
+          return null; // Mismatch protection
+        }
+      } catch {
+        return null;
+      }
+    }
+    return r;
+  }
+
+  const rawAddress = (req.query.address as string) || (req.body?.address as string);
+  if (rawAddress) {
+    try {
+      const clean = validateAndNormalizeAddress(rawAddress);
+      return latestReportByWallet.get(clean.toLowerCase()) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
 
 // Export: Markdown
 app.all('/api/export/markdown', async (req: Request, res: Response) => {
-  const reportId = (req.query.id as string) || (req.body?.id as string);
-  const report = req.body?.report || (reportId ? reportStore.get(reportId) : null) || latestReportCache;
+  const report = resolveExportReport(req);
 
   if (!report) {
-    return res.status(404).send('No audit report available. Please generate a report first.');
+    return res.status(404).send('No audit report available for the specified wallet. Please generate a report first.');
   }
 
   const markdown = exportToMarkdown(report);
@@ -92,11 +174,10 @@ app.all('/api/export/markdown', async (req: Request, res: Response) => {
 
 // Export: CSV
 app.all('/api/export/csv', async (req: Request, res: Response) => {
-  const reportId = (req.query.id as string) || (req.body?.id as string);
-  const report = req.body?.report || (reportId ? reportStore.get(reportId) : null) || latestReportCache;
+  const report = resolveExportReport(req);
 
   if (!report) {
-    return res.status(404).send('No audit report available. Please generate a report first.');
+    return res.status(404).send('No audit report available for the specified wallet. Please generate a report first.');
   }
 
   const csv = exportToCSV(report);
@@ -107,11 +188,10 @@ app.all('/api/export/csv', async (req: Request, res: Response) => {
 
 // Export: PDF
 app.all('/api/export/pdf', async (req: Request, res: Response) => {
-  const reportId = (req.query.id as string) || (req.body?.id as string);
-  const report = req.body?.report || (reportId ? reportStore.get(reportId) : null) || latestReportCache;
+  const report = resolveExportReport(req);
 
   if (!report) {
-    return res.status(404).send('No audit report available. Please generate a report first.');
+    return res.status(404).send('No audit report available for the specified wallet. Please generate a report first.');
   }
 
   try {

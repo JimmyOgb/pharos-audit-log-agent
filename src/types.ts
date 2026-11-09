@@ -11,7 +11,7 @@ export type AllowanceStatus =
   | 'Current allowance reduced or revoked'
   | 'Current allowance unavailable or unverified';
 
-export type ScanCompleteness = 'COMPLETE' | 'PARTIAL' | 'FAILED';
+export type ScanCompleteness = 'COMPLETE' | 'PARTIAL' | 'FAILED' | 'UNKNOWN';
 
 export type AssetType = 'NATIVE_PHAROS' | 'ERC20' | 'ERC721' | 'ERC1155';
 

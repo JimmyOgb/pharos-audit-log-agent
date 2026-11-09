@@ -1,4 +1,5 @@
 import { isAddress } from 'viem';
+import { validateAndNormalizeAddress } from './addressValidator.js';
 import type { AuditReport, AuditRequest, ActivityItem, CategoryTotals, CategorySummary } from '../types.js';
 import { resolveBlockRange } from './blockResolver.js';
 import { fetchRawActivitiesForAddress } from './activityFetcher.js';
@@ -9,12 +10,21 @@ import { pharosAtlantic, rpcClient } from './rpc.js';
 export async function generateAuditReport(request: AuditRequest): Promise<AuditReport> {
   const { address, startDate, endDate, blockSpan, cursor, continuationState } = request;
 
-  if (!address || !isAddress(address)) {
-    throw new Error(`Invalid EVM wallet address: "${address}". Expected 0x followed by 40 hex characters.`);
+  // Universal EVM address validation and normalization
+  const cleanAddress = validateAndNormalizeAddress(address);
+
+  // Enforce wallet-specific scan isolation: continuation sessions cannot be transferred between wallets
+  if (continuationState && typeof continuationState === 'object' && continuationState.originalTargetAddress) {
+    const origClean = validateAndNormalizeAddress(continuationState.originalTargetAddress);
+    if (origClean !== cleanAddress) {
+      throw new Error(
+        `Continuation state address mismatch: continuation was created for "${origClean}", but request targeted "${cleanAddress}". Wallet-specific scan sessions are strictly isolated.`
+      );
+    }
   }
 
   // 1. Resolve date range to verified block numbers and scan coverage
-  const range = await resolveBlockRange(startDate, endDate, blockSpan || 3000, cursor, continuationState, address);
+  const range = await resolveBlockRange(startDate, endDate, blockSpan || 3000, cursor, continuationState, cleanAddress);
   const coverage = range.coverage;
 
   let rawLogsRetrieved = 0;
@@ -30,7 +40,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
 
   // 2. Query live on-chain logs across the block range using direct JSON-RPC serialization
   try {
-    rawLogsBundle = await fetchRawActivitiesForAddress(address, range.fromBlock, range.toBlock);
+    rawLogsBundle = await fetchRawActivitiesForAddress(cleanAddress, range.fromBlock, range.toBlock);
     rawLogsRetrieved = rawLogsBundle.totalRawLogsRetrieved || 0;
   } catch (err: any) {
     console.warn(`[ReportGenerator] Log query warning:`, err?.message || err);
@@ -78,7 +88,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
   }
 
   // 4. Classify log-based activities (ERC-20, NFT, Swaps, Approvals)
-  const logClassification = await classifyActivities(rawLogsBundle, address, blockTimestamps);
+  const logClassification = await classifyActivities(rawLogsBundle, cleanAddress, blockTimestamps);
 
   // 5. Query and classify native PHAROS transactions
   const candidateTxHashes: string[] = [];
@@ -97,7 +107,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
 
   try {
     nativeResult = await fetchNativeTransactions(
-      address,
+      cleanAddress,
       range.fromBlock,
       range.toBlock,
       candidateTxHashes
@@ -306,15 +316,19 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
   let activityNarrative = '';
   if (unifiedActivities.length === 0) {
     if (coverage.completeness === 'COMPLETE') {
-      activityNarrative = `No qualifying on-chain activity was detected across the entire requested block window. The wallet maintained a completely idle state with zero inbound transfers, zero outbound transfers, zero swaps, and zero approval grants.`;
+      activityNarrative = `Zero qualifying on-chain activities were detected across the entire requested block window (100.0% coverage; blocks ${coverage.resolvedStartBlock.toLocaleString()} to ${coverage.resolvedEndBlock.toLocaleString()}). The wallet maintained an idle state with zero native transfers, zero ERC-20 transfers, zero DEX swaps, and zero token approvals across all successfully inspected blocks.`;
+    } else if (coverage.completeness === 'PARTIAL') {
+      activityNarrative = `Zero qualifying on-chain activities were detected within the cumulatively inspected ${totalCumulativeScanned.toLocaleString()}-block window (blocks ${cumulativeStartB.toLocaleString()} to ${cumulativeEndB.toLocaleString()}). ZERO-ACTIVITY SAFEGUARD: This zero-activity result applies solely to the ${totalCumulativeScanned.toLocaleString()} blocks inspected (${coverage.coveragePercentage}% of the requested range). The wallet cannot be certified idle across the full requested timeframe; ${coverage.omittedBlockCount.toLocaleString()} remaining blocks (${(cumulativeEndB + 1).toLocaleString()} to ${coverage.resolvedEndBlock.toLocaleString()}) were not covered in this session and require continuation scanning before the wallet can be certified idle across the full requested calendar period.`;
+    } else if (coverage.completeness === 'FAILED') {
+      activityNarrative = `Audit execution FAILED during scanning: ${coverage.failureReason || 'RPC query error'}. Zero-activity status cannot be verified.`;
     } else {
-      activityNarrative = `No qualifying on-chain activity was detected within the cumulatively inspected ${totalCumulativeScanned.toLocaleString()}-block window (${cumulativeStartFormatted} to ${cumulativeEndFormatted}; blocks ${cumulativeStartB.toLocaleString()} to ${cumulativeEndB.toLocaleString()}). Note: ${coverage.omittedBlockCount.toLocaleString()} remaining blocks (${(cumulativeEndB + 1).toLocaleString()} to ${coverage.resolvedEndBlock.toLocaleString()}) were not covered in this session and require continuation scanning before the wallet can be certified idle across the full requested calendar period.`;
+      activityNarrative = `Scan evidence is insufficient to establish on-chain activity or idle status.`;
     }
   } else {
     activityNarrative = `Detected a total of ${unifiedActivities.length} on-chain activities: ${categoryTotals.transfers_in.count} inbound transfer(s) (${categoryTotals.transfers_in.nativeCount} native PHAROS, ${categoryTotals.transfers_in.erc20Count} ERC-20), ${categoryTotals.transfers_out.count} outbound transfer(s) (${categoryTotals.transfers_out.nativeCount} native PHAROS, ${categoryTotals.transfers_out.erc20Count} ERC-20), ${categoryTotals.swaps.count} DEX swap(s), ${categoryTotals.token_approvals.count} token approval(s), and ${categoryTotals.contract_interactions.count} contract interaction(s). Notable transaction alerts: ${notableTransactions.length}. Net native balance impact: ${categoryTotals.native_summary.netNativeChangeFormatted}.`;
   }
 
-  const executiveSummary = `[Scan Status: ${completenessBadge}] Audit report for wallet ${address} on Pharos Atlantic Testnet (Chain ID 688689). ${completenessNarrative} ${activityNarrative}`;
+  const executiveSummary = `[Scan Status: ${completenessBadge}] Audit report for wallet ${cleanAddress} on Pharos Atlantic Testnet (Chain ID 688689). ${completenessNarrative} ${activityNarrative}`;
 
   // Unique transactions count
   const allTxHashes = new Set<string>();
@@ -322,12 +336,12 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     allTxHashes.add(act.txHash.toLowerCase());
   }
 
-  const reportId = `AUDIT-${Date.now().toString(36).toUpperCase()}-${address.slice(2, 8).toUpperCase()}`;
+  const reportId = `AUDIT-${Date.now().toString(36).toUpperCase()}-${cleanAddress.slice(2, 8).toUpperCase()}`;
 
   return {
     reportId,
     generatedAt: new Date().toISOString(),
-    walletAddress: address,
+    walletAddress: cleanAddress,
     startDate: cumulativeStartFormatted,
     endDate: cumulativeEndFormatted,
     startBlock: cumulativeStartB,
@@ -366,8 +380,8 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
       verifiedOnChain: true,
       nativeTxCount: nativeResult.activities.length,
       unsupportedOrPartialNotice: coverage.completeness === 'PARTIAL'
-        ? `Scan was bounded to ${coverage.actualScannedBlocksCount} blocks in the latest chunk (${totalCumulativeScanned.toLocaleString()} blocks cumulative) to respect execution budgets. Outbound native transfers are deterministically verified via nonce transitions. Full-history unindexed inbound native transfers require trace indexing; use continuation cursor to audit earlier block spans.`
-        : '100% of requested blocks scanned and reconciled against on-chain state.',
+        ? `Scan was bounded to ${coverage.actualScannedBlocksCount} blocks in the latest chunk (${totalCumulativeScanned.toLocaleString()} blocks cumulative) to respect execution budgets. Outbound native transfers are deterministically verified via nonce transitions. Full-history unindexed inbound native transfers and internal contract transfers require trace indexing; use continuation cursor to audit earlier block spans.`
+        : '100% of requested blocks scanned and reconciled against on-chain state. Note: Direct native value transfers and balance delta transitions are inspected; unindexed contract-internal native transfers require archive trace indexing.',
     },
   };
 }
