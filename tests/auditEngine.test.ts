@@ -665,7 +665,78 @@ async function runTests() {
   assert(chunk1Rep.provenance.unsupportedOrPartialNotice.includes('inbound native transfers'));
   console.log('  ✔ Provenance transparently discloses unindexed inbound native transfer boundary.');
 
-  console.log('\n🎉 ALL 33 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
+  // ====================================================
+  // SECTION 6: FULL-RANGE SCAN INTEGRITY & GENESIS REMEDIATION (Tests 34 - 38)
+  // ====================================================
+  console.log('\n--- SECTION 6: Full-Range Scan Integrity & Genesis Clamping ---');
+
+  // Test 34: Genesis boundary clamping for dates prior to September 28, 2025
+  console.log('Test 34: Genesis boundary clamping for dates prior to testnet launch');
+  const preGenesisRange = await resolveBlockRange('2025-01-02', '2026-11-09', 3000);
+  assert.strictEqual(preGenesisRange.coverage.resolvedStartBlock, 1, 'Pre-genesis date must clamp to block 1');
+  assert.strictEqual(preGenesisRange.fromBlock, 1n, 'First chunk must start at Genesis Block 1');
+  assert.strictEqual(preGenesisRange.coverage.genesisClamped, true, 'genesisClamped flag must be true');
+  assert(preGenesisRange.coverage.genesisNotice !== undefined, 'Genesis notice must be provided');
+  assert(preGenesisRange.coverage.genesisNotice?.includes('2025-09-28'), 'Notice must state genesis date 2025-09-28');
+  assert.strictEqual(preGenesisRange.startTimestamp, 1759043784, 'Timestamp must match Genesis block 1 timestamp');
+  console.log('  ✔ Pre-genesis date (2025-01-02) successfully clamped to Genesis Block 1 (1759043784).');
+
+  // Test 35: Continuity across sequential chunks (no gaps, no overlaps)
+  console.log('\nTest 35: Strict block cursor continuity (no gaps, no overlaps)');
+  const seqChunk1 = await generateAuditReport({
+    address: testWallet,
+    startDate: '2026-11-01',
+    endDate: '2026-11-09',
+    blockSpan: 3000,
+  });
+  assert.strictEqual(seqChunk1.coverage.completeness, 'PARTIAL');
+  assert(seqChunk1.continuationState !== undefined);
+  assert.strictEqual(seqChunk1.continuationState.nextFromBlock, seqChunk1.coverage.actualEndBlock + 1);
+
+  const seqChunk2 = await generateAuditReport({
+    address: testWallet,
+    continuationState: seqChunk1.continuationState,
+    blockSpan: 3000,
+  });
+  assert.strictEqual(seqChunk2.coverage.actualStartBlock, seqChunk1.coverage.actualEndBlock + 1, 'Chunk 2 start must be Chunk 1 end + 1');
+  assert.strictEqual(seqChunk2.coverage.cumulativeScannedBlocksCount, 6000, 'Cumulative count must be 6,000 blocks');
+  assert.strictEqual(seqChunk2.coverage.scannedChunksCount, 2, 'Scanned chunks count must be 2');
+  console.log('  ✔ Strict cursor continuity verified: Chunk 1 [..end] -> Chunk 2 [end+1..] with 6,000 cumulative blocks.');
+
+  // Test 36: Cumulative metrics strictly separated from chunk metrics in reports
+  console.log('\nTest 36: Cumulative metrics strictly separated from chunk metrics');
+  assert(seqChunk2.cumulativeScannedBlocks === 6000);
+  assert(seqChunk2.coverage.actualScannedBlocksCount === 3000);
+  assert(seqChunk2.startBlock === seqChunk1.coverage.actualStartBlock);
+  assert(seqChunk2.endBlock === seqChunk2.coverage.actualEndBlock);
+  console.log('  ✔ Cumulative range and single-chunk range strictly distinguished in report.');
+
+  // Test 37: Exporters reflect cumulative metrics and genesis disclosures
+  console.log('\nTest 37: Exporters reflect cumulative metrics and genesis disclosures');
+  const genesisReport = await generateAuditReport({
+    address: testWallet,
+    startDate: '2025-01-02',
+    endDate: '2026-11-09',
+    blockSpan: 3000,
+  });
+  const genesisMd = exportToMarkdown(genesisReport);
+  assert(genesisMd.includes('Genesis Boundary Notice'), 'Markdown must include Genesis Boundary Notice');
+  assert(genesisMd.includes('2025-09-28'), 'Markdown must disclose 2025-09-28 genesis launch');
+  assert(genesisMd.includes('Cumulative Scanned Coverage'), 'Markdown must show Cumulative Scanned Coverage');
+  
+  const genesisCsv = exportToCSV(genesisReport);
+  assert(genesisCsv.includes('PARTIAL'), 'CSV must include scan completeness');
+  assert(genesisCsv.includes(testWallet), 'CSV must include wallet address');
+  console.log('  ✔ Markdown and CSV exports successfully incorporate cumulative metrics and genesis disclosures.');
+
+  // Test 38: Target wallet full-range audit with honest non-idle partial reporting
+  console.log('\nTest 38: Target wallet full-range audit returns honest partial non-idle report');
+  assert.strictEqual(genesisReport.coverage.completeness, 'PARTIAL');
+  assert(genesisReport.summary.executiveSummary.includes('PARTIAL'));
+  assert(genesisReport.summary.executiveSummary.includes('require continuation scanning before the wallet can be certified idle'));
+  console.log('  ✔ Truthful executive summary verified: wallet is not certified idle until full interval is covered.');
+
+  console.log('\n🎉 ALL 38 REGRESSION & QUALITY ASSURANCE TESTS PASSED!');
 }
 
 runTests().catch((err) => {

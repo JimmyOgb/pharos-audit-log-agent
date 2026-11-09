@@ -8,6 +8,12 @@ export function exportToMarkdown(report: AuditReport): string {
   const lines: string[] = [];
   const cov = report.coverage;
 
+  const totalScanned = cov.cumulativeScannedBlocksCount || cov.actualScannedBlocksCount;
+  const cumStartB = cov.cumulativeStartBlock ?? cov.actualStartBlock;
+  const cumEndB = cov.cumulativeEndBlock ?? cov.actualEndBlock;
+  const cumStartFormatted = cov.cumulativeStartDateFormatted || cov.actualStartDateFormatted;
+  const cumEndFormatted = cov.cumulativeEndDateFormatted || cov.actualEndDateFormatted;
+
   lines.push(`# Pharos On-Chain Audit-Log Report`);
   lines.push(``);
   lines.push(`**Report ID:** \`${report.reportId}\`  `);
@@ -15,11 +21,17 @@ export function exportToMarkdown(report: AuditReport): string {
   lines.push(`**Network:** ${report.network.name} (Chain ID: \`${report.network.chainId}\`)  `);
   lines.push(`**Target Wallet:** \`${report.walletAddress}\`  `);
   lines.push(`**Scan Completeness:** **${cov.completeness}** (${cov.coveragePercentage}% of requested block span)  `);
-  lines.push(`**Requested Period:** ${cov.requestedStartDate} to ${cov.requestedEndDate} (Requested Blocks: \`${cov.resolvedStartBlock}\` .. \`${cov.resolvedEndBlock}\`; Span: ${cov.requestedBlockSpan.toLocaleString()} blocks)  `);
-  lines.push(`**Actual Scanned Coverage:** ${cov.actualStartDateFormatted} to ${cov.actualEndDateFormatted} (Scanned Blocks: \`${cov.actualStartBlock}\` .. \`${cov.actualEndBlock}\`; Span: ${cov.actualScannedBlocksCount.toLocaleString()} blocks)  `);
+  lines.push(`**Requested Period:** ${cov.requestedStartDate} to ${cov.requestedEndDate} (Requested Blocks: \`${cov.resolvedStartBlock.toLocaleString()}\` .. \`${cov.resolvedEndBlock.toLocaleString()}\`; Span: ${cov.requestedBlockSpan.toLocaleString()} blocks)  `);
   
-  if (cov.omittedBlockCount > 0) {
-    lines.push(`> [!WARNING] **Partial Scan Notice**: ${cov.omittedBlockCount.toLocaleString()} earlier blocks were omitted due to execution boundary safeguards. Uninspected blocks: \`${cov.resolvedStartBlock}\` .. \`${cov.actualStartBlock - 1}\`.  `);
+  if (cov.genesisClamped && cov.genesisNotice) {
+    lines.push(`> [!NOTE] **Genesis Boundary Notice**: ${cov.genesisNotice}  `);
+  }
+
+  lines.push(`**Cumulative Scanned Coverage:** ${cumStartFormatted} to ${cumEndFormatted} (Blocks: \`${cumStartB.toLocaleString()}\` .. \`${cumEndB.toLocaleString()}\`; Cumulative Span: ${totalScanned.toLocaleString()} blocks across ${cov.scannedChunksCount} chunk(s))  `);
+  
+  if (cov.completeness === 'PARTIAL') {
+    lines.push(`**Latest Inspected Chunk:** ${cov.actualStartDateFormatted} to ${cov.actualEndDateFormatted} (Blocks: \`${cov.actualStartBlock.toLocaleString()}\` .. \`${cov.actualEndBlock.toLocaleString()}\`; Chunk Span: ${cov.actualScannedBlocksCount.toLocaleString()} blocks)  `);
+    lines.push(`> [!WARNING] **Partial Scan Notice**: ${cov.omittedBlockCount.toLocaleString()} remaining blocks are uninspected due to execution boundary safeguards. Remaining blocks: \`${(cumEndB + 1).toLocaleString()}\` .. \`${cov.resolvedEndBlock.toLocaleString()}\`. Use continuation cursor to inspect remaining blocks.  `);
   }
 
   lines.push(`**On-Chain Verification:** ${report.provenance.verifiedOnChain ? 'VERIFIED LIVE (Read-Only)' : 'UNVERIFIED'}  `);
@@ -84,7 +96,7 @@ export function exportToMarkdown(report: AuditReport): string {
     if (cov.completeness === 'COMPLETE') {
       lines.push(`*No on-chain events found for this address in the completely audited date range.*`);
     } else {
-      lines.push(`*No on-chain events found for this address in the scanned ${cov.actualScannedBlocksCount.toLocaleString()}-block window (${cov.actualStartDateFormatted} to ${cov.actualEndDateFormatted}). Uninspected earlier blocks require continuation scanning.*`);
+      lines.push(`*No on-chain events found for this address in the cumulatively scanned ${totalScanned.toLocaleString()}-block window (${cumStartFormatted} to ${cumEndFormatted}). Uninspected blocks (${(cumEndB + 1).toLocaleString()} to ${cov.resolvedEndBlock.toLocaleString()}) require continuation scanning.*`);
     }
   } else {
     lines.push(`| Block | Category | Asset Type | Description | Amount / Assets | Status | Transaction Hash |`);
@@ -146,6 +158,8 @@ export function exportToCSV(report: AuditReport): string {
   const rows: string[] = [];
   rows.push(headers.join(','));
 
+  const totalScanned = report.coverage.cumulativeScannedBlocksCount || report.coverage.actualScannedBlocksCount;
+
   if (report.allActivities.length === 0) {
     const emptyRow = [
       escapeCSV(report.reportId),
@@ -159,7 +173,7 @@ export function exportToCSV(report: AuditReport): string {
       escapeCSV('NATIVE_PHAROS'),
       escapeCSV(false),
       escapeCSV('No activity detected'),
-      escapeCSV(`Zero on-chain activities detected within inspected window (${report.coverage.actualScannedBlocksCount.toLocaleString()} blocks).`),
+      escapeCSV(`Zero on-chain activities detected within inspected cumulative window (${totalScanned.toLocaleString()} blocks; ${report.startDate} to ${report.endDate}).`),
       escapeCSV(report.walletAddress),
       escapeCSV(''),
       escapeCSV(''),
@@ -233,6 +247,9 @@ export function exportToPDF(report: AuditReport): Promise<Buffer> {
       doc.on('error', (err) => reject(err));
 
       const cov = report.coverage;
+      const totalScanned = cov.cumulativeScannedBlocksCount || cov.actualScannedBlocksCount;
+      const cumStartB = cov.cumulativeStartBlock ?? cov.actualStartBlock;
+      const cumEndB = cov.cumulativeEndBlock ?? cov.actualEndBlock;
 
       // Header Banner
       doc.rect(40, 40, 515, 60).fill('#0f172a');
@@ -248,7 +265,7 @@ export function exportToPDF(report: AuditReport): Promise<Buffer> {
       if (cov.completeness === 'PARTIAL') {
         doc.rect(40, currentY, 515, 26).fill('#fef3c7').stroke('#f59e0b');
         doc.fillColor('#92400e').fontSize(8.5).text(
-          `NOTICE: PARTIAL AUDIT (${cov.coveragePercentage}% of requested range). ${cov.omittedBlockCount.toLocaleString()} earlier blocks were omitted due to execution safeguards.`,
+          `NOTICE: PARTIAL AUDIT (${cov.coveragePercentage}%). ${totalScanned.toLocaleString()} blocks cumulative scanned. ${cov.omittedBlockCount.toLocaleString()} remaining blocks uninspected.`,
           50,
           currentY + 7
         );
@@ -263,10 +280,10 @@ export function exportToPDF(report: AuditReport): Promise<Buffer> {
       doc.fillColor('#0284c7').text(report.walletAddress, 135, currentY + 8);
 
       doc.fillColor('#334155').text(`Requested Range:`, 50, currentY + 24, { bold: true } as any);
-      doc.fillColor('#475569').text(`${cov.requestedStartDate.slice(0, 10)} to ${cov.requestedEndDate.slice(0, 10)} (Blocks ${cov.resolvedStartBlock}..${cov.resolvedEndBlock})`, 135, currentY + 24);
+      doc.fillColor('#475569').text(`${cov.requestedStartDate.slice(0, 10)} to ${cov.requestedEndDate.slice(0, 10)} (Blocks ${cov.resolvedStartBlock.toLocaleString()}..${cov.resolvedEndBlock.toLocaleString()})`, 135, currentY + 24);
 
-      doc.fillColor('#334155').text(`Actual Scanned:`, 50, currentY + 40, { bold: true } as any);
-      doc.fillColor('#475569').text(`${cov.actualStartDateFormatted.slice(0, 16)} to ${cov.actualEndDateFormatted.slice(0, 16)} (${cov.actualScannedBlocksCount.toLocaleString()} blocks)`, 135, currentY + 40);
+      doc.fillColor('#334155').text(`Cumulative Scanned:`, 50, currentY + 40, { bold: true } as any);
+      doc.fillColor('#475569').text(`${report.startDate} to ${report.endDate} (Blocks ${cumStartB.toLocaleString()}..${cumEndB.toLocaleString()}; ${totalScanned.toLocaleString()} blocks)`, 135, currentY + 40);
 
       doc.fillColor('#334155').text(`Network:`, 50, currentY + 56, { bold: true } as any);
       doc.fillColor('#16a34a').text(`${report.network.name} (Chain ID: ${report.network.chainId}) - LIVE VERIFIED`, 135, currentY + 56);

@@ -115,6 +115,14 @@ export interface ContinuationState {
   nextToBlock: number;
   isComplete: boolean;
   empiricalSecondsPerBlock?: number;
+  cumulativeStartBlock?: number;
+  cumulativeEndBlock?: number;
+  cumulativeStartTimestamp?: number;
+  cumulativeEndTimestamp?: number;
+  cumulativeStartDateFormatted?: string;
+  cumulativeEndDateFormatted?: string;
+  genesisClamped?: boolean;
+  genesisNotice?: string;
 }
 
 export interface ScanCoverage {
@@ -130,6 +138,19 @@ export interface ScanCoverage {
   actualEndTimestamp: number;
   actualStartDateFormatted: string;
   actualEndDateFormatted: string;
+  cumulativeStartBlock?: number;
+  cumulativeEndBlock?: number;
+  cumulativeScannedBlocksCount?: number;
+  cumulativeStartDateFormatted?: string;
+  cumulativeEndDateFormatted?: string;
+  currentChunkStartBlock?: number;
+  currentChunkEndBlock?: number;
+  currentChunkBlocksCount?: number;
+  currentChunkStartDateFormatted?: string;
+  currentChunkEndDateFormatted?: string;
+  remainingBlocksCount?: number;
+  genesisClamped?: boolean;
+  genesisNotice?: string;
   completeness: ScanCompleteness;
   isComplete: boolean;
   omittedBlockCount: number;
@@ -152,6 +173,11 @@ export interface AuditReport {
   endDate: string;
   startBlock: number;
   endBlock: number;
+  cumulativeStartDate?: string;
+  cumulativeEndDate?: string;
+  cumulativeStartBlock?: number;
+  cumulativeEndBlock?: number;
+  cumulativeScannedBlocks?: number;
   network: NetworkConfig;
   coverage: ScanCoverage;
   continuationState?: ContinuationState;

@@ -283,12 +283,22 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
   const completenessBadge = coverage.completeness;
   let completenessNarrative = '';
 
+  const totalCumulativeScanned = coverage.cumulativeScannedBlocksCount || coverage.actualScannedBlocksCount;
+  const cumulativeStartB = coverage.cumulativeStartBlock ?? coverage.actualStartBlock;
+  const cumulativeEndB = coverage.cumulativeEndBlock ?? coverage.actualEndBlock;
+  const cumulativeStartFormatted = coverage.cumulativeStartDateFormatted || coverage.actualStartDateFormatted;
+  const cumulativeEndFormatted = coverage.cumulativeEndDateFormatted || coverage.actualEndDateFormatted;
+
+  const genesisAddendum = coverage.genesisClamped && coverage.genesisNotice
+    ? ` Note: ${coverage.genesisNotice}`
+    : '';
+
   if (coverage.completeness === 'COMPLETE') {
-    completenessNarrative = `A COMPLETE audit covering 100.0% of the requested date range (${coverage.requestedStartDate} to ${coverage.requestedEndDate}; blocks ${coverage.resolvedStartBlock} to ${coverage.resolvedEndBlock}) was executed successfully across ${coverage.scannedChunksCount} block chunk(s).`;
+    completenessNarrative = `A COMPLETE audit covering 100.0% of the requested date range (${coverage.requestedStartDate.slice(0, 10)} to ${coverage.requestedEndDate.slice(0, 10)}; blocks ${coverage.resolvedStartBlock.toLocaleString()} to ${coverage.resolvedEndBlock.toLocaleString()}) was executed successfully across ${coverage.scannedChunksCount} block chunk(s) (${totalCumulativeScanned.toLocaleString()} blocks total).${genesisAddendum}`;
   } else if (coverage.completeness === 'PARTIAL') {
-    completenessNarrative = `A PARTIAL audit covering ${coverage.coveragePercentage}% of the requested range (${coverage.actualScannedBlocksCount.toLocaleString()} blocks scanned in this chunk; ${coverage.omittedBlockCount.toLocaleString()} remaining blocks uninspected due to execution boundary safeguards). Scanned coverage: ${coverage.actualStartDateFormatted} to ${coverage.actualEndDateFormatted} (blocks ${coverage.actualStartBlock} to ${coverage.actualEndBlock}). Continuation cursor is provided to inspect remaining blocks.`;
+    completenessNarrative = `A PARTIAL audit covering ${coverage.coveragePercentage}% of the requested range (${totalCumulativeScanned.toLocaleString()} blocks cumulative scanned across ${coverage.scannedChunksCount} chunk(s); ${coverage.omittedBlockCount.toLocaleString()} remaining blocks uninspected due to execution boundary safeguards). Cumulative scanned range: ${cumulativeStartFormatted} to ${cumulativeEndFormatted} (blocks ${cumulativeStartB.toLocaleString()} to ${cumulativeEndB.toLocaleString()}). Latest chunk: blocks ${coverage.actualStartBlock.toLocaleString()} to ${coverage.actualEndBlock.toLocaleString()} (${coverage.actualScannedBlocksCount.toLocaleString()} blocks). Continuation cursor is provided to inspect remaining blocks.${genesisAddendum}`;
   } else {
-    completenessNarrative = `Audit execution FAILED during scanning: ${coverage.failureReason || 'RPC query error'}.`;
+    completenessNarrative = `Audit execution FAILED during scanning: ${coverage.failureReason || 'RPC query error'}.${genesisAddendum}`;
   }
 
   let activityNarrative = '';
@@ -296,7 +306,7 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     if (coverage.completeness === 'COMPLETE') {
       activityNarrative = `No qualifying on-chain activity was detected across the entire requested block window. The wallet maintained a completely idle state with zero inbound transfers, zero outbound transfers, zero swaps, and zero approval grants.`;
     } else {
-      activityNarrative = `No qualifying on-chain activity was detected within the inspected ${coverage.actualScannedBlocksCount.toLocaleString()}-block window (${coverage.actualStartDateFormatted} to ${coverage.actualEndDateFormatted}). Note: remaining blocks (${coverage.actualEndBlock + 1} to ${coverage.resolvedEndBlock}) were not covered in this request and require continuation scanning before the wallet can be certified idle across the full requested calendar period.`;
+      activityNarrative = `No qualifying on-chain activity was detected within the cumulatively inspected ${totalCumulativeScanned.toLocaleString()}-block window (${cumulativeStartFormatted} to ${cumulativeEndFormatted}; blocks ${cumulativeStartB.toLocaleString()} to ${cumulativeEndB.toLocaleString()}). Note: ${coverage.omittedBlockCount.toLocaleString()} remaining blocks (${(cumulativeEndB + 1).toLocaleString()} to ${coverage.resolvedEndBlock.toLocaleString()}) were not covered in this session and require continuation scanning before the wallet can be certified idle across the full requested calendar period.`;
     }
   } else {
     activityNarrative = `Detected a total of ${unifiedActivities.length} on-chain activities: ${categoryTotals.transfers_in.count} inbound transfer(s) (${categoryTotals.transfers_in.nativeCount} native PHAROS, ${categoryTotals.transfers_in.erc20Count} ERC-20), ${categoryTotals.transfers_out.count} outbound transfer(s) (${categoryTotals.transfers_out.nativeCount} native PHAROS, ${categoryTotals.transfers_out.erc20Count} ERC-20), ${categoryTotals.swaps.count} DEX swap(s), ${categoryTotals.token_approvals.count} token approval(s), and ${categoryTotals.contract_interactions.count} contract interaction(s). Notable transaction alerts: ${notableTransactions.length}. Net native balance impact: ${categoryTotals.native_summary.netNativeChangeFormatted}.`;
@@ -316,10 +326,15 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     reportId,
     generatedAt: new Date().toISOString(),
     walletAddress: address,
-    startDate: coverage.actualStartDateFormatted,
-    endDate: coverage.actualEndDateFormatted,
-    startBlock: coverage.actualStartBlock,
-    endBlock: coverage.actualEndBlock,
+    startDate: cumulativeStartFormatted,
+    endDate: cumulativeEndFormatted,
+    startBlock: cumulativeStartB,
+    endBlock: cumulativeEndB,
+    cumulativeStartDate: cumulativeStartFormatted,
+    cumulativeEndDate: cumulativeEndFormatted,
+    cumulativeStartBlock: cumulativeStartB,
+    cumulativeEndBlock: cumulativeEndB,
+    cumulativeScannedBlocks: totalCumulativeScanned,
     network: {
       name: pharosAtlantic.name,
       chainId: pharosAtlantic.id,
@@ -343,13 +358,13 @@ export async function generateAuditReport(request: AuditRequest): Promise<AuditR
     allActivities: unifiedActivities,
     provenance: {
       queryTimestamp: new Date().toISOString(),
-      blockSpan: coverage.actualScannedBlocksCount,
+      blockSpan: totalCumulativeScanned,
       rawLogsRetrieved,
       deduplicatedEventsCount: unifiedActivities.length,
       verifiedOnChain: true,
       nativeTxCount: nativeResult.activities.length,
       unsupportedOrPartialNotice: coverage.completeness === 'PARTIAL'
-        ? `Scan was bounded to ${coverage.actualScannedBlocksCount} blocks to respect execution budgets. Outbound native transfers are deterministically verified via nonce transitions. Full-history unindexed inbound native transfers require trace indexing; use continuation cursor to audit earlier block spans.`
+        ? `Scan was bounded to ${coverage.actualScannedBlocksCount} blocks in the latest chunk (${totalCumulativeScanned.toLocaleString()} blocks cumulative) to respect execution budgets. Outbound native transfers are deterministically verified via nonce transitions. Full-history unindexed inbound native transfers require trace indexing; use continuation cursor to audit earlier block spans.`
         : '100% of requested blocks scanned and reconciled against on-chain state.',
     },
   };

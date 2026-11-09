@@ -148,59 +148,75 @@ export function renderDashboardHtml(): string {
       margin-top: 0.75rem;
       display: flex;
       gap: 0.5rem;
-      align-items: center;
       flex-wrap: wrap;
+      align-items: center;
     }
     .quick-btn {
       background: #1f2937;
       border: 1px solid #374151;
-      color: #9ca3af;
-      padding: 0.25rem 0.6rem;
+      color: #94a3b8;
+      padding: 0.3rem 0.6rem;
       border-radius: 6px;
       font-size: 0.75rem;
       cursor: pointer;
       font-family: 'JetBrains Mono', monospace;
-      transition: all 0.2s;
+      transition: all 0.15s ease;
     }
     .quick-btn:hover {
+      background: #374151;
       color: #fff;
-      border-color: var(--primary);
     }
     .btn-submit {
       background: var(--primary);
       color: #fff;
       border: none;
-      padding: 0.7rem 1.4rem;
+      padding: 0.7rem 1.25rem;
       border-radius: 8px;
       font-weight: 600;
+      font-size: 0.95rem;
       cursor: pointer;
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 0.5rem;
-      transition: background 0.2s;
+      transition: background 0.15s;
     }
-    .btn-submit:hover {
+    .btn-submit:hover:not(:disabled) {
       background: var(--primary-hover);
     }
     .btn-submit:disabled {
-      opacity: 0.5;
+      opacity: 0.6;
       cursor: not-allowed;
     }
+    .btn-reset {
+      background: #374151;
+      color: #94a3b8;
+      border: none;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-reset:hover {
+      background: #4b5563;
+      color: #fff;
+    }
     .summary-card {
-      background: linear-gradient(180deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9));
-      border: 1px solid #334155;
+      border-left: 4px solid var(--primary);
     }
     .summary-header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      margin-bottom: 1rem;
+      margin-bottom: 1.25rem;
+      gap: 1rem;
       flex-wrap: wrap;
-      gap: 0.5rem;
     }
     .summary-title {
-      font-size: 1.15rem;
+      font-size: 1.25rem;
       font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
     }
     .export-btns {
       display: flex;
@@ -208,41 +224,40 @@ export function renderDashboardHtml(): string {
       flex-wrap: wrap;
     }
     .btn-export {
-      background: #1e293b;
-      border: 1px solid #475569;
-      color: #e2e8f0;
-      padding: 0.4rem 0.8rem;
+      background: #1f2937;
+      border: 1px solid #374151;
+      color: #e5e7eb;
+      padding: 0.45rem 0.85rem;
       border-radius: 6px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
+      font-size: 0.85rem;
+      font-weight: 500;
       cursor: pointer;
-      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.15s;
     }
     .btn-export:hover {
-      background: #334155;
-      color: #fff;
-      border-color: #64748b;
+      background: #374151;
+      border-color: #4b5563;
     }
     .btn-export-primary {
-      background: #2563eb;
-      border-color: #3b82f6;
+      background: rgba(59, 130, 246, 0.15);
+      border-color: rgba(59, 130, 246, 0.4);
+      color: #60a5fa;
     }
     .btn-export-primary:hover {
-      background: #1d4ed8;
+      background: rgba(59, 130, 246, 0.25);
     }
     .narrative-box {
       background: rgba(15, 23, 42, 0.6);
-      border-left: 4px solid var(--primary);
-      padding: 1rem;
-      border-radius: 0 8px 8px 0;
-      margin-bottom: 1.5rem;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 1.1rem;
+      margin-bottom: 1.25rem;
       line-height: 1.6;
       font-size: 0.95rem;
-      color: #e2e8f0;
+      color: #cbd5e1;
     }
     .categories-grid {
       display: grid;
@@ -251,36 +266,31 @@ export function renderDashboardHtml(): string {
       margin-bottom: 1.5rem;
     }
     .cat-card {
-      background: #0f172a;
+      background: #0d131f;
       border: 1px solid var(--card-border);
       border-radius: 8px;
       padding: 1rem;
-      transition: transform 0.2s, border-color 0.2s;
-    }
-    .cat-card:hover {
-      border-color: #374151;
     }
     .cat-name {
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+      font-size: 0.85rem;
       color: var(--text-muted);
-      margin-bottom: 0.4rem;
+      margin-bottom: 0.35rem;
     }
     .cat-count {
-      font-size: 1.8rem;
+      font-size: 1.75rem;
       font-weight: 700;
       color: #fff;
     }
     .cat-detail {
       font-size: 0.75rem;
-      color: #94a3b8;
-      margin-top: 0.4rem;
+      color: #64748b;
+      margin-top: 0.25rem;
     }
     .table-container {
       overflow-x: auto;
-      border-radius: 8px;
       border: 1px solid var(--card-border);
+      border-radius: 8px;
+      background: #0d131f;
     }
     table {
       width: 100%;
@@ -289,11 +299,14 @@ export function renderDashboardHtml(): string {
       font-size: 0.85rem;
     }
     th {
-      background: #1e293b;
+      background: #111827;
       padding: 0.75rem 1rem;
-      color: #94a3b8;
       font-weight: 600;
+      color: var(--text-muted);
       border-bottom: 1px solid var(--card-border);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
     }
     td {
       padding: 0.75rem 1rem;
@@ -323,11 +336,6 @@ export function renderDashboardHtml(): string {
     }
     .link-explorer:hover {
       text-decoration: underline;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: var(--text-muted);
     }
     .spinner {
       display: inline-block;
@@ -365,7 +373,7 @@ export function renderDashboardHtml(): string {
   <main>
     <div class="hero">
       <h1>On-Chain Compliance Activity Audit</h1>
-      <p>Analyze genuine historical activity for any EVM wallet on Pharos Atlantic Testnet. Verifies transfers in/out, DEX swaps, and token allowances with instant Markdown, PDF, and CSV exports.</p>
+      <p>Analyze genuine historical activity for any EVM wallet on Pharos Atlantic Testnet. Verifies native transfers, ERC-20 movements, DEX swaps, and token allowances with instant Markdown, PDF, and CSV exports.</p>
     </div>
 
     <div class="card">
@@ -378,7 +386,7 @@ export function renderDashboardHtml(): string {
               id="addressInput" 
               placeholder="0x..." 
               required 
-              value="0x299ce4113abf88f4997737184aa8a7a3d58ac15c"
+              value="0xE4220c4b71877bb94EB173f467ef5c5557017085"
               autocomplete="off"
               spellcheck="false"
             />
@@ -400,11 +408,18 @@ export function renderDashboardHtml(): string {
         </div>
 
         <div class="quick-addresses">
-          <span style="font-size: 0.8rem; color: #64748b;">Sample Active Wallets:</span>
-          <button type="button" class="quick-btn" onclick="setWallet('0x299ce4113abf88f4997737184aa8a7a3d58ac15c')">0x299c...c15c (Active Trader)</button>
-          <button type="button" class="quick-btn" onclick="setWallet('0x000000000000000000000000000000000000dead')">0x0000...dead (Burn/Idle)</button>
+          <span style="font-size: 0.8rem; color: #64748b;">Sample Wallets:</span>
+          <button type="button" class="quick-btn" onclick="setWallet('0xE4220c4b71877bb94EB173f467ef5c5557017085')">0xE422...7085 (Target Wallet)</button>
+          <button type="button" class="quick-btn" onclick="setWallet('0x89b97db15f0bc3b12c8a2e4ae8549788c0823838')">0x89b9...3838 (Positive ERC-20)</button>
+          <button type="button" class="quick-btn" onclick="setWallet('0x000000000000000000000000000000000000dead')">0x0000...dead (Idle/Burn)</button>
+          <button type="button" class="btn-reset" onclick="clearSavedSession()" id="btnClearSession" style="display: none; margin-left: auto;">🗑️ Reset Saved Session</button>
         </div>
       </form>
+    </div>
+
+    <div id="restoredNotice" style="display: none; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.85rem; color: #93c5fd; display: flex; justify-content: space-between; align-items: center;">
+      <span>📂 Restored active audit session from local storage.</span>
+      <button type="button" onclick="clearSavedSession()" style="background: none; border: 1px solid #3b82f6; color: #93c5fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer;">Clear Session</button>
     </div>
 
     <div id="resultsContainer" style="display: none;">
@@ -413,11 +428,16 @@ export function renderDashboardHtml(): string {
   </main>
 
   <footer>
-    Pharos Audit-Log Agent • Atlantic Testnet (Chain ID 688689) • Strictly Read-Only Verifiable Ledger • No Simulation
+    Pharos Audit-Log Agent • Atlantic Testnet (Chain ID 688689) • Genesis Block 1: 2025-09-28T07:16:24Z • Strictly Read-Only Verifiable Ledger
   </footer>
 
   <script>
-    // Initialize date inputs default to past 7 days
+    const STORAGE_KEY = 'pharos_audit_report_session';
+    let currentReport = null;
+    let currentContinuationState = null;
+    let isAutoScanning = false;
+    let pauseRequested = false;
+
     window.addEventListener('DOMContentLoaded', () => {
       const today = new Date();
       const past7 = new Date();
@@ -425,14 +445,46 @@ export function renderDashboardHtml(): string {
       
       document.getElementById('endDate').value = today.toISOString().slice(0, 10);
       document.getElementById('startDate').value = past7.toISOString().slice(0, 10);
+
+      // Restore saved session from localStorage if available
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.walletAddress && parsed.coverage) {
+            currentReport = parsed;
+            currentContinuationState = parsed.continuationState || null;
+            document.getElementById('addressInput').value = parsed.walletAddress;
+            if (parsed.coverage.requestedStartDate) {
+              document.getElementById('startDate').value = parsed.coverage.requestedStartDate.slice(0, 10);
+            }
+            if (parsed.coverage.requestedEndDate) {
+              document.getElementById('endDate').value = parsed.coverage.requestedEndDate.slice(0, 10);
+            }
+            document.getElementById('restoredNotice').style.display = 'flex';
+            document.getElementById('btnClearSession').style.display = 'inline-block';
+            renderReport(parsed);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not restore saved session:', err);
+      }
     });
 
     function setWallet(addr) {
       document.getElementById('addressInput').value = addr;
     }
 
-    let currentReport = null;
-    let currentContinuationState = null;
+    function clearSavedSession() {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
+      currentReport = null;
+      currentContinuationState = null;
+      document.getElementById('resultsContainer').style.display = 'none';
+      document.getElementById('restoredNotice').style.display = 'none';
+      document.getElementById('btnClearSession').style.display = 'none';
+    }
 
     async function handleAuditSubmit(e) {
       e.preventDefault();
@@ -443,7 +495,6 @@ export function renderDashboardHtml(): string {
       const btnSubmit = document.getElementById('btnSubmit');
       const btnText = document.getElementById('btnText');
       const btnSpinner = document.getElementById('btnSpinner');
-      const container = document.getElementById('resultsContainer');
 
       btnSubmit.disabled = true;
       btnText.innerText = 'Scanning Chain...';
@@ -478,6 +529,14 @@ export function renderDashboardHtml(): string {
       const container = document.getElementById('resultsContainer');
       container.style.display = 'block';
 
+      // Persist report in localStorage
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(r));
+        document.getElementById('btnClearSession').style.display = 'inline-block';
+      } catch (e) {
+        console.warn('Could not save session to localStorage:', e);
+      }
+
       const catMap = {};
       r.categorySummaries.forEach(c => { catMap[c.category] = c; });
 
@@ -485,26 +544,38 @@ export function renderDashboardHtml(): string {
       const statusColor = cov.completeness === 'COMPLETE' ? '#10b981' : (cov.completeness === 'PARTIAL' ? '#f59e0b' : '#ef4444');
       const statusBg = cov.completeness === 'COMPLETE' ? 'rgba(16, 185, 129, 0.1)' : (cov.completeness === 'PARTIAL' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)');
 
+      const totalScanned = cov.cumulativeScannedBlocksCount || (r.continuationState ? r.continuationState.totalScannedBlocks : cov.actualScannedBlocksCount);
+      const totalReq = cov.requestedBlockSpan || (r.continuationState ? r.continuationState.totalRequestedBlocks : totalScanned);
+      const remaining = cov.omittedBlockCount || 0;
+      const cumStartB = cov.cumulativeStartBlock ?? cov.actualStartBlock;
+      const cumEndB = cov.cumulativeEndBlock ?? cov.actualEndBlock;
+
       let partialNoticeHtml = '';
       if (cov.completeness === 'PARTIAL') {
-        const totalScanned = r.continuationState ? r.continuationState.totalScannedBlocks : cov.actualScannedBlocksCount;
-        const totalReq = r.continuationState ? r.continuationState.totalRequestedBlocks : cov.requestedBlockSpan;
-        const remaining = cov.omittedBlockCount || 0;
-        
         let actionBtns = '';
         if (r.continuationState) {
           actionBtns = '<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">' +
             '<button type="button" onclick="continueScan()" style="background: #f59e0b; color: #000; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⏭️ Scan Next Chunk (3,000 blocks)</button>' +
-            '<button type="button" id="btnAutoScan" onclick="autoScanAll()" style="background: #3b82f6; color: #fff; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⚡ Auto-Scan Remaining</button>' +
+            (isAutoScanning 
+              ? '<button type="button" id="btnPauseScan" onclick="pauseAutoScan()" style="background: #ef4444; color: #fff; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⏸️ Pause Auto-Scan</button>'
+              : '<button type="button" id="btnAutoScan" onclick="autoScanAll()" style="background: #3b82f6; color: #fff; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⚡ Auto-Scan Remaining</button>'
+            ) +
           '</div>';
         } else if (cov.continuationCursor) {
           actionBtns = '<button type="button" onclick="continueScan()" style="background: #f59e0b; color: #000; border: none; font-weight: 700; padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">⏭️ Scan Next Chunk</button>';
         }
 
-        partialNoticeHtml = '<div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 0.9rem 1.1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">' +
-          '<div><strong style="color: #f59e0b;">⚠️ Partial Audit Coverage (' + (cov.coveragePercentage || 0) + '%):</strong> ' +
-          '<span style="font-size: 0.85rem; color: #cbd5e1;">Scanned ' + (totalScanned ? totalScanned.toLocaleString() : 0) + ' of ' + (totalReq ? totalReq.toLocaleString() : 0) + ' requested blocks. ' + (remaining ? remaining.toLocaleString() : 0) + ' remaining blocks uninspected.</span></div>' +
-          actionBtns +
+        partialNoticeHtml = '<div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 0.9rem 1.1rem; margin-bottom: 1.25rem;">' +
+          '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">' +
+            '<div>' +
+              '<strong style="color: #f59e0b;">⚠️ Partial Audit Coverage (' + (cov.coveragePercentage || 0) + '%):</strong> ' +
+              '<span style="font-size: 0.85rem; color: #cbd5e1;">Cumulatively scanned ' + (totalScanned ? totalScanned.toLocaleString() : 0) + ' of ' + (totalReq ? totalReq.toLocaleString() : 0) + ' requested blocks across ' + (cov.scannedChunksCount || 1) + ' chunk(s). ' + (remaining ? remaining.toLocaleString() : 0) + ' remaining blocks uninspected.</span>' +
+            '</div>' +
+            actionBtns +
+          '</div>' +
+          '<div style="background: #1f2937; border-radius: 9999px; height: 6px; width: 100%; margin-top: 0.75rem; overflow: hidden;">' +
+            '<div style="background: #f59e0b; height: 100%; width: ' + Math.min(100, (cov.coveragePercentage || 0)) + '%; transition: width 0.3s ease;"></div>' +
+          '</div>' +
         '</div>';
       }
 
@@ -526,9 +597,9 @@ export function renderDashboardHtml(): string {
 
       let allRows = '';
       if (r.allActivities.length === 0) {
-        allRows = \`<tr><td colspan="7" style="text-align: center; color: #9ca3af;">Zero activities detected in scanned window (\${cov.actualScannedBlocksCount ? cov.actualScannedBlocksCount.toLocaleString() : 0} blocks).</td></tr>\`;
+        allRows = \`<tr><td colspan="7" style="text-align: center; color: #9ca3af;">Zero activities detected in cumulatively scanned window (\${totalScanned ? totalScanned.toLocaleString() : 0} blocks; \${r.startDate} to \${r.endDate}).</td></tr>\`;
       } else {
-        allRows = r.allActivities.slice(0, 50).map(t => \`
+        allRows = r.allActivities.slice(0, 100).map(t => \`
           <tr>
             <td style="font-family: 'JetBrains Mono', monospace;">\${t.blockNumber}</td>
             <td><span class="badge badge-\${t.category}">\${t.categoryLabel}</span></td>
@@ -541,18 +612,25 @@ export function renderDashboardHtml(): string {
         \`).join('');
       }
 
+      const genesisBadge = cov.genesisClamped && cov.genesisNotice
+        ? \`<div style="color: #38bdf8; font-size: 0.8rem; margin-top: 0.25rem;">ℹ️ \${cov.genesisNotice}</div>\`
+        : '';
+
       container.innerHTML = \`
         <div class="card summary-card">
           <div class="summary-header">
             <div>
-              <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
                 <div class="summary-title">Audit Report: \${r.walletAddress}</div>
                 <span style="background: \${statusBg}; border: 1px solid \${statusColor}; color: \${statusColor}; padding: 0.25rem 0.6rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700;">
                   STATUS: \${cov.completeness || 'COMPLETE'}
                 </span>
               </div>
-              <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.35rem;">
-                Requested: \${cov.requestedStartDate ? cov.requestedStartDate.slice(0, 10) : ''} to \${cov.requestedEndDate ? cov.requestedEndDate.slice(0, 10) : ''} • Scanned: \${r.startDate} to \${r.endDate} (\${cov.actualScannedBlocksCount ? cov.actualScannedBlocksCount.toLocaleString() : 0} blocks)
+              <div style="font-size: 0.85rem; color: #94a3b8; margin-top: 0.4rem; line-height: 1.5;">
+                <div><strong>Requested Period:</strong> \${cov.requestedStartDate ? cov.requestedStartDate.slice(0, 10) : ''} to \${cov.requestedEndDate ? cov.requestedEndDate.slice(0, 10) : ''} (Blocks \${(cov.resolvedStartBlock || 0).toLocaleString()} .. \${(cov.resolvedEndBlock || 0).toLocaleString()}; \${(cov.requestedBlockSpan || 0).toLocaleString()} blocks)</div>
+                \${genesisBadge}
+                <div style="margin-top: 0.25rem;"><strong>Cumulative Scanned Coverage:</strong> <span style="color: #f3f4f6; font-weight: 600;">\${r.startDate} to \${r.endDate}</span> (Blocks \${cumStartB.toLocaleString()} .. \${cumEndB.toLocaleString()}; <strong>\${totalScanned.toLocaleString()} blocks scanned</strong> across \${cov.scannedChunksCount || 1} chunk(s))</div>
+                \${cov.completeness === 'PARTIAL' ? \`<div style="color: #f59e0b; font-size: 0.8rem; margin-top: 0.15rem;">Latest Chunk: Blocks \${(cov.actualStartBlock || 0).toLocaleString()} .. \${(cov.actualEndBlock || 0).toLocaleString()} (\${(cov.actualScannedBlocksCount || 0).toLocaleString()} blocks) • \${(cov.omittedBlockCount || 0).toLocaleString()} remaining blocks uninspected</div>\` : ''}
               </div>
             </div>
             <div class="export-btns">
@@ -653,7 +731,9 @@ export function renderDashboardHtml(): string {
         </div>
       \`;
       
-      container.scrollIntoView({ behavior: 'smooth' });
+      if (!isAutoScanning) {
+        container.scrollIntoView({ behavior: 'smooth' });
+      }
     }
 
     async function continueScan(isAuto = false) {
@@ -672,67 +752,81 @@ export function renderDashboardHtml(): string {
         btnSpinner.style.display = 'inline-block';
       }
 
-      try {
-        const payload = {
-          address: currentReport.walletAddress,
-        };
+      let retries = 0;
+      while (retries < 3) {
+        try {
+          const payload = {
+            address: currentReport.walletAddress,
+          };
 
-        if (currentContinuationState) {
-          payload.continuationState = currentContinuationState;
-        } else if (currentReport.coverage && currentReport.coverage.continuationCursor) {
-          payload.cursor = currentReport.coverage.continuationCursor;
-        } else {
-          alert('Audit is already complete or no continuation available.');
-          return false;
-        }
+          if (currentContinuationState) {
+            payload.continuationState = currentContinuationState;
+          } else if (currentReport.coverage && currentReport.coverage.continuationCursor) {
+            payload.cursor = currentReport.coverage.continuationCursor;
+          } else {
+            alert('Audit is already complete or no continuation available.');
+            return false;
+          }
 
-        const resp = await fetch('/api/report', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+          const resp = await fetch('/api/report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
 
-        const data = await resp.json();
-        if (data.success && data.report) {
-          currentReport = data.report;
-          currentContinuationState = data.report.continuationState || null;
-          renderReport(currentReport);
-          return true;
-        } else {
-          alert('Continuation failed: ' + (data.error || 'Unknown error'));
-          return false;
+          const data = await resp.json();
+          if (data.success && data.report) {
+            currentReport = data.report;
+            currentContinuationState = data.report.continuationState || null;
+            renderReport(currentReport);
+            return true;
+          } else {
+            throw new Error(data.error || 'Unknown error');
+          }
+        } catch (e) {
+          retries++;
+          if (retries >= 3) {
+            alert('Continuation halted after retries: ' + e.message);
+            return false;
+          }
+          await new Promise(r => setTimeout(r, 1000));
         }
-      } catch (e) {
-        alert('Continuation error: ' + e.message);
-        return false;
-      } finally {
-        if (!isAuto) {
-          btnSubmit.disabled = false;
-          btnText.innerText = 'Generate Audit';
-          btnSpinner.style.display = 'none';
-        }
+      }
+      return false;
+    }
+
+    function pauseAutoScan() {
+      pauseRequested = true;
+      const pauseBtn = document.getElementById('btnPauseScan');
+      if (pauseBtn) {
+        pauseBtn.disabled = true;
+        pauseBtn.innerText = 'Pausing...';
       }
     }
 
     async function autoScanAll() {
-      const autoBtn = document.getElementById('btnAutoScan');
-      if (autoBtn) {
-        autoBtn.disabled = true;
-        autoBtn.innerText = 'Auto-Scanning...';
-      }
+      if (isAutoScanning) return;
+      isAutoScanning = true;
+      pauseRequested = false;
 
-      let safety = 0;
-      while (currentContinuationState && !currentReport.coverage.isComplete && safety < 50) {
-        safety++;
+      renderReport(currentReport); // updates buttons to show pause button
+
+      let chunksProcessed = 0;
+      const maxChunks = 2000;
+
+      while (currentContinuationState && !currentReport.coverage.isComplete && chunksProcessed < maxChunks) {
+        if (pauseRequested) {
+          break;
+        }
+        chunksProcessed++;
         const ok = await continueScan(true);
         if (!ok) break;
         await new Promise(r => setTimeout(r, 200));
       }
 
-      if (autoBtn) {
-        autoBtn.disabled = false;
-        autoBtn.innerText = '⚡ Auto-Scan Remaining';
-      }
+      isAutoScanning = false;
+      pauseRequested = false;
+      renderReport(currentReport); // resets button states
     }
 
     async function exportFile(format) {
