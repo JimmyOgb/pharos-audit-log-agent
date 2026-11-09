@@ -1,0 +1,39 @@
+{
+  "name": "pharos-audit-log-agent",
+  "version": "1.0.0",
+  "description": "Production-ready EVM Audit-Log Agent on Pharos Atlantic Testnet generating verifiable compliance activity reports with Markdown, PDF, and CSV exports.",
+  "main": "api/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "tsx src/server.ts",
+    "test": "tsx tests/auditEngine.test.ts"
+  },
+  "keywords": [
+    "pharos",
+    "audit-log",
+    "compliance",
+    "accounting",
+    "blockchain",
+    "atlantic-testnet",
+    "agent"
+  ],
+  "author": "JimmyOgb",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pdfkit": "^0.16.0",
+    "viem": "^2.23.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "@types/pdfkit": "^0.13.9",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
